@@ -11,6 +11,8 @@ nsk_device_context_t *h_devctxt, *d_devctxt;
 volatile void *hd_mems[3];
 volatile void *h_mems[4];
 
+cudaStream_t smaster, sslave, sch2d, scd2h, sdh2d, sdd2h;
+
 enum mem_mode_t {
     PINNED,
     PAGEABLE,
@@ -114,12 +116,37 @@ static void _init_nskk()
     close(nskkfd);    
 }
 
+static void _init_streams()
+{
+    csc(cudaStreamCreate(&smaster));
+    csc(cudaStreamCreate(&sslave));
+    csc(cudaStreamCreate(&sch2d));
+    csc(cudaStreamCreate(&scd2h));
+    csc(cudaStreamCreate(&sdh2d));
+    csc(cudaStreamCreate(&sdd2h));
+}
+
+static void _destroy_streams()
+{
+    csc(cudaStreamDestroy(smaster));
+    csc(cudaStreamDestroy(sslave));
+    csc(cudaStreamDestroy(sch2d));
+    csc(cudaStreamDestroy(scd2h));
+    csc(cudaStreamDestroy(sdh2d));
+    csc(cudaStreamDestroy(sdd2h));
+}
+
 static void _init_context()
 {
     _init_mem();
     _init_nskk();
 
     fill_tasks(h_devctxt);
+    _init_streams();
+}
+
+static void _cleanup_context()
+{
 }
 
 static void _copy_context()

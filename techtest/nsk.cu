@@ -16,6 +16,8 @@ volatile void *h_mems[4];
 
 cudaStream_t smaster, sslave, sch2d, scd2h, sdh2d, sdd2h;
 int current = 0;
+int last = 0;
+int next = 0;
 
 enum mem_mode_t {
     PINNED,
@@ -34,6 +36,9 @@ typedef struct {
 
 #define GIRDS_X 32
 #define BLOCKS_X 32
+
+#define NOP_TASK 0
+
 
 dim3 blockdim = dim3(BLOCKS_X,1);
 dim3 griddim = dim3(GRIDS_X,1);
@@ -70,8 +75,9 @@ __global__ void nskslave(nsk_device_context_t *dc)
 		if (current == -1)
 		    goon = 0;
 		else {
-		    req = dc->requests[current];
-		    newtask = 1;
+		    req = dc->requests+current;
+		    if (req->taskfunc != NOP_TASK)
+			newtask = 1;
 		}
 		__threadfence_block();
 	    }
@@ -97,17 +103,26 @@ __global__ void nskmaster(
 {
     int i, current;
     nsk_response_t *resp;
+    nsk_request_t *req;
 
     resetslavesdone(); // no need, maybe
     
     current = dc->current;
-    while (dc->current != -1) {
-	if (current != dc->current) {
+    while (1) {
+	if (current != dc->current) {	    
 	    current = dc->current;
-	    resp = dc->responses[current];
+	    if (current == -1)
+		break;
+	    req = dc->requests+current;
+	    resp = dc->responses+current;
+	    
 	    resp->errno = 0;
-	    resp->state = NSK_TRUNNING;
-	    resp->request_id = dc->requests[current]->request_id;
+	    if (req->taskfunc == NOP_TASK)
+		resp->state = NSK_TSTOPPED;
+	    else
+		resp->state = NSK_TRUNNING;
+	    resp->request_id = req->request_id;
+	    
 	    __threadfence_system();
 	}
 	if (allslavesdone()) {
@@ -318,9 +333,9 @@ static void _put_device_mem(void* devmem)
 
 static int _prepare_task(int next)
 {
-    nsk_request_t *nreq = h_requests[next];
-    nsk_response_t *nresp = h_responses[next];
-    nsk_request_t *kreq = k_requests[next];
+    nsk_request_t *nreq = h_requests+next;
+    nsk_response_t *nresp = h_responses+next;
+    nsk_request_t *kreq = k_requests+next;
 
     volatile void* dmem = _get_next_device_mem();
     if (dmem == NULL)
@@ -336,45 +351,80 @@ static int _prepare_task(int next)
     nresp->request_id = nreq->request_id;
     nresp->state = NSK_TREADY;
     nresp->errno = 0;
-    csc( cudaMemcpyAsync((void*)(h_dc->responses[next]), (void*)nresp,
+    csc( cudaMemcpyAsync((void*)(h_dc->responses+next), (void*)nresp,
 			 sizeof(nsk_response_t), cudaMemcpyHostToDevice, sch2d));
-    csc( cudaMemcpyAsync((void*)(h_dc->requests[next]), (void*)nreq,
+    csc( cudaMemcpyAsync((void*)(h_dc->requests+next), (void*)nreq,
 			 sizeof(nsk_request_t), cudaMemcpyHostToDevice, sch2d));
     return 1;
 }
 
-static void _start_task(int next)
+static void _start_task(int which)
 {
-    // redundant?
-    current = next; 
-    h_dc->current = next;
+    h_dc->current = which;
     csc( cudaMemcpyAsync((void*)(&d_dc->current), (void*)(&h_dc->current),
 			 sizeof(int), cudaMemcpyHostToDevice, sch2d));
-    csc( cudaStreamSynchronize(sch2d));
+    //csc( cudaStreamSynchronize(sch2d));
 }
 
 static void _finish_task(int which)
 {
-    nsk_request_t *hreq = h_requests[which];
-    nsk_request_t *kreq = k_requests[which];
-    nsk_response_t *kresp = k_responses[which];
+    if (which == -1)
+	return;
+    if (h_requests[which].taskfunc == NOP_TASK)
+	return;
+    nsk_request_t *hreq = h_requests+which;
+    nsk_request_t *kreq = k_requests+which;
 
     csc( cudaMemcpyAsync(kreq->outputs, hreq->outputs,
 				 cudaMemcpyDeviceToHost, scd2h));
-    csc( cudaStreamSynchronize(sch2d));
-    _put_device_mem(hreq->inputs);
-    kresp->state = NSK_TSTOPPED;    
+    //csc( cudaStreamSynchronize(scd2h));   
 }
 
 
 static int _current_task_done()
 {
+    if (current == -1)
+	return 1;
+    if (h_requests[current].taskfunc == NOP_TASK)
+	return 1;
+    if (cudaStreamQuery(sch2d) == cudaSuccess) {
+	csc( cudaMemcpyAsync((void*)(h_responses+current),
+			     (void*)(h_dc->responses+current),
+			     sizeof(nsk_response_t),
+			     cudaMemcpyDeviceToHost, sdd2h));
+	csc( cudaStreamSynchronize(sdd2h));
+	if (h_responses[current].state == NSK_TSTOPPED)
+	    return 1;
+    }
+    return 0;
+}
+
+static int _task_finished(int which)
+{
+    if (which == -1)
+	return 1;
+    if (h_requests[which].taskfunc == NOP_TASK)
+	return 1;
+    
+    cudaError_t e = cudaStreamQuery(scd2h);
+    switch (e) {
+    case cudaSuccess:
+	_put_device_mem(h_requests[which].inputs);
+	k_responses[which].state = NSK_TSTOPPED;
+	return 1;
+    case cudaErrorNotReady:
+	break;
+    default:
+	csc(e);
+	break;
+    }
+
     return 0;
 }
 
 static int _poll_next_task()
 {
-    return -1;
+    return current;
 }
 
 static void _nskhost()
@@ -386,14 +436,26 @@ static void _nskhost()
     nskslave<<<griddim, blockdim, 0, sslave>>>(d_dc);
 
     while(1){
-        /*
-	 *  if current done: 
-	 *      _finish_task
-	 *      if next exists:
-	 *          _start_task(next)
-	 *  if next_task OK:
-	 *      _prepare_task(next)
-	 *      
-	 */
+	if (_current_task_done()) {
+	    if (_task_finished(last)) {
+		_finish_task(current);
+		last = current;
+		if (next != current) {
+		    current = next;
+		    _start_task(current);
+		    if (current == -1)
+			break;
+		}
+
+	    }
+	}
+	if (next == current)) {
+	    next = _poll_next_task();
+	    if (next != current && next != -1) {
+		_prepare_task(next);
+	    }
+	}        
     }
+
+    _cleanup_context();
 }

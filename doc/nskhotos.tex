@@ -1,0 +1,121 @@
+\documentclass[letterpaper,twocolumn,10pt]{article}
+\usepackage{usenix,epsfig,endnotes}
+\usepackage{color}
+\begin{document}
+
+%don't want date printed
+\date{}
+
+%make title bold and 14 pt font (Latex default is non-bold, 16 pt)
+\title{\Large \bf GPU-accelerated OS Kernel}
+
+
+\author{
+{\rm Weibin Sun, \  Robert Ricci}\\
+University of Utah
+} % end author
+
+\maketitle
+
+% Comment it for final
+%\thispagestyle{empty}
+
+
+\subsection*{Abstract}
+The throughput-oriented General Purpose Graphics Processing Unit(
+GPGPU) computing has already been adapted by many high performance
+computing applications including scientific computing, computer
+graphics, data mining...( { \color{red} \textbf{from 
+~\cite{Owens:2007:ASO, Garland:2010:UTA} and others} }) and gained
+significant speedup over the CPU only computing. However, few
+applications of GPGPU acceleration are made on the operating system
+kernel. That's because the tasks on GPU are massively parallelized to
+improve the throughput rather than latency and on the contrary OS
+kernel is designed to be time efficient to reduce latency for fast
+response. In this paper, we argue that the OS kernel can also benefit
+from the GPU acceleration by offloading the traditional tasks of OS
+from CPU to GPU. We present a modified Linux kernel that can run and
+communicate with some of its tasks on GPU in time-efficent way with
+the help of well-designed latency-oriented GPU kernels(programs
+running on GPU also called kernels).
+
+\section{Introduction}
+
+{\color{red} \textbf{This section introduces the heterogenous trend of our computer architecture, focus on GPU+CPU. Ref to Helios, Multikernel. Other processors except CPU are more and more powerful. Give some examples of the GPU computing speedup from the references. Most current PCs are with GPUs. So it is a waste if GPUs can only be used by computer games or videos. The so-called GPGPU, general purpose computing is not as general as it literrally means. Those computing are mostly scientific computing, database query and data mining and .... The OS itself doesn't benefit from GPU at all. So it will speedup the whole system if OS can be run on GPU. There are some papers(PacketShader, Gnort, malware-detection) try to accelerate some computation intensive tasks of system with GPU. Their results are excerllent but the latency sucks(give examples from the packetshader latency, gnort latency-IDS is not online checking at line rate, malware detection is not time-critical.). (Need more on our idea)We try to offload the tasks in OS kernel to GPU so that accelerate it. However, GPU is not fully programmable so that we can't simply copy our OS kernel to it and run just like multi-core. It acts as a co-presessor that works in a request-response way. (More on GPU computing model/limit) The memory copy between GPU and CPU also time-consuming, the kernel launches and completion are expensive in the OS kernel case. So we need a time-efficient design of the GPU kernels in order to accelerate our OS. } }
+
+\section{Problems of GPU in Latency-oriented Apps}
+
+{\color{red} \textbf{ Memory copy and many small kernels launch are time-consuming. First we need point out that OS kernel tasks are not very long and hence many small kernels. Also notice that the GPU working model is launching a kernel for a task. } }
+
+
+\subsection{Memory copy benchmark results}
+
+{\color{red} \textbf{Analyse memory copy. Ref to~\ref{fig:flowchart}. Point out the PINNED memory can help although it cost many physical memory. The answer is that current physical memory is enough, compared with the 1.5GB GTX480. Also mention that our design of the NSK can reuse the memory for different tasks and hence the cost is fixed size. } }
+
+\begin{figure}[t]
+  \begin{center}
+%    \psfig{file=figure.eps,scale=0.45}         % PostScript figure
+     \texttt{<table or fig to show the memory copy benchmark>}
+    \caption{Wonderful flowchart}
+    \label{fig:flowchart}
+  \end{center}
+\end{figure}
+
+\subsection{Kernel launch and completion}
+
+{\color{red} \textbf{ show our kernel launch benchmark results. The kernel latency is not only the launch but also the completion! Packetshader paper presented launch latency only. The solution is to eliminate launch and completion times by using NSK. Show our NSK results. Also notice NSK uses PINNED memory to communicate with CPU. } }
+
+\noindent
+{\color{red} \textbf{ for noindent only, ignore this. } }
+
+
+\section{A GPU-accelerated Linux Kernel}
+
+{\color{red} \bf A figure to show the NSK system, including kernel side, use side, GPU side. Explain them later. Another figure to show the ideal system, which CUDA can be invoked inside OS kernel. Say something about the Nvidia limitations.}
+
+\subsection{Kernel Side}
+
+{\color{red} \bf Intercept normal flow, put request data to the request queue, then done. A callback is set for that request when response OK.}
+
+\subsection{User Side}
+
+{\color{red} \bf Block reading or select-based polling to get requst from kernel, then request the NSK at the GPU side, notice the memory management. The result becomes response write to another fd rather than the request fd.}
+
+\subsection{GPU Side}
+
+{\color{red} \bf  Launch when new task functions added, a master manages requests, fills responses. Slaves do the real work. Mention the memory access and synchronization/fence. Say more on the commmunication.}
+
+
+\section{Evaluation}
+
+{\color{red} \bf Simply show the comparison between: NSK, many kernel and vanilla Linux.}
+
+
+\section{Discussion}
+
+{\color{red} \bf Fast communication, fast launch, fast completion. Fixed tasks, to run new task, re-launch the kernel with new tasks filled in the task-function array. Fixed memory preallocated, but OK becasue of reuse among tasks. }
+
+
+\section{Conclusion}
+
+We have presemted a GPU-accelerated Linux kernel. {\color{red} \bf It shows the feasibility of accelerating OS tasks with GPU, not only the traditional 'general purpose' computing. }
+
+
+\section{Acknowledgments}
+
+{\color{red} \bf Thanks to guys and funds should be thanked.}
+
+{\footnotesize \bibliographystyle{acm}
+\bibliography{nskhotos}}
+
+
+\theendnotes
+
+\end{document}
+
+
+
+
+
+
+

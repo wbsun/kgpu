@@ -1,0 +1,180 @@
+% usenix.sty - to be used with latex2e for USENIX.
+% To use this style file, look at the template usenix_template.tex
+%
+% $Id: usenix.sty,v 1.2 2005/02/16 22:30:47 maniatis Exp $
+%
+% The following definitions are modifications of standard article.sty
+% definitions, arranged to do a better job of matching the USENIX
+% guidelines.
+% It will automatically select two-column mode and the Times-Roman
+% font.
+
+%
+% USENIX papers are two-column.
+% Times-Roman font is nice if you can get it (requires NFSS,
+% which is in latex2e.
+
+\if@twocolumn\else\input twocolumn.sty\fi
+\usepackage{times}
+
+%
+% USENIX wants margins of: 1" sides, 1" bottom, and 1" top.
+% 0.25" gutter between columns.
+% Gives active areas of 6.5" x 9"
+\setlength{\textheight}{9.0in}
+\setlength{\columnsep}{0.25in}
+\setlength{\textwidth}{6.45in}
+\setlength{\topmargin}{0.0in}
+\setlength{\headheight}{0.0in}
+\setlength{\headsep}{0.0in}
+\setlength{\evensidemargin}{0.0in}
+\setlength{\oddsidemargin}{0.0in}
+\setlength{\marginparsep}{1.5em}
+\setlength{\marginparwidth}{0.35in}
+
+
+% Usenix wants no page numbers for camera-ready papers, so that they can
+% number them themselves.  But submitted papers should have page numbers
+% for the reviewers' convenience.
+% 
+%
+% \pagestyle{empty}
+
+%
+% Usenix titles are in 14-point bold type, with no date, and with no
+% change in the empty page headers.  The whole author section is 12 point
+% italic--- you must use {\rm } around the actual author names to get
+% them in roman.
+%
+\def\maketitle{\par
+ \begingroup
+   \renewcommand\thefootnote{\fnsymbol{footnote}}%
+   \def\@makefnmark{\hbox to\z@{$\m@th^{\@thefnmark}$\hss}}%
+    \long\def\@makefntext##1{\parindent 1em\noindent
+            \hbox to1.8em{\hss$\m@th^{\@thefnmark}$}##1}%
+   \if@twocolumn
+     \twocolumn[\@maketitle]%
+     \else \newpage
+     \global\@topnum\z@
+     \@maketitle \fi\@thanks
+ \endgroup
+ \setcounter{footnote}{0}%
+ \let\maketitle\relax
+ \let\@maketitle\relax
+ \gdef\@thanks{}\gdef\@author{}\gdef\@title{}\let\thanks\relax}
+
+\def\@maketitle{\newpage
+ \vbox to 2.5in{
+ \vspace*{\fill}
+ \vskip 2em
+ \begin{center}%
+  {\Large\bf \@title \par}%
+  \vskip 0.375in minus 0.300in
+  {\large\it
+   \lineskip .5em
+   \begin{tabular}[t]{c}\@author
+   \end{tabular}\par}%
+ \end{center}%
+ \par
+ \vspace*{\fill}
+% \vskip 1.5em
+ }
+}
+
+%
+% The abstract is preceded by a 12-pt bold centered heading
+\def\abstract{\begin{center}%
+{\large\bf \abstractname\vspace{-.5em}\vspace{\z@}}%
+\end{center}}
+\def\endabstract{}
+
+%
+% Main section titles are 12-pt bold.  Lower divisions can
+% be same size or smaller: we choose same.
+% Main section leading is tight.  Subsection leading is even
+% slightly tighter.  All lower divisions are formatted like subsections.
+% 
+\newcommand\@sectionfont{\reset@font\large\bf}
+\newlength\@sectionaboveskip
+\setlength\@sectionaboveskip{-0.7\baselineskip
+  plus -0.1\baselineskip
+  minus -0.1\baselineskip}
+\newlength\@sectionbelowskip
+\setlength\@sectionbelowskip{0.3\baselineskip
+  plus 0.1\baselineskip}
+\newlength\@subsectionaboveskip
+\setlength\@subsectionaboveskip{-0.5\baselineskip
+  plus -0.1\baselineskip}
+\renewcommand\section{\@startsection {section}{1}{\z@}%
+    {\@sectionaboveskip}{\@sectionbelowskip}{\@sectionfont}}
+\newcommand\@gensubsection[2]{\@startsection {#1}{#2}{\z@}%
+    {\@subsectionaboveskip}{\@sectionbelowskip}{\@sectionfont}}
+\renewcommand\subsection{\@gensubsection{subsection}{2}}
+\renewcommand\subsubsection{\@gensubsection{subsubsection}{3}}
+%\renewcommand\paragraph{\@gensubsection{paragraph}{4}}
+%\renewcommand\subparagraph{\@gensubsection{subparagaph}{5}}
+\renewcommand\paragraph{\@startsection{paragraph}{4}{\z@}%
+                                    {1.25ex \@plus 0.2ex \@minus 0.2ex}%
+                                    {-1.0em}%
+                                    {\normalfont\normalsize\bfseries}}
+\renewcommand\subparagraph{\@startsection{subparagraph}{5}{\parindent}%
+                                    {1.25ex \@plus 0.2ex \@minus 0.2ex}%
+                                    {-1.0em}%
+                                    {\normalfont\normalsize\bfseries}}
+
+% List items need to be tightened up.
+% There must be a better way than copying
+% the definitions to modify the list environment...
+\def\@itemspacings{\listparindent=\parindent
+  \parsep=0pt\topsep=0.3\baselineskip\partopsep=0pt\itemsep=0pt}
+% now make envs use itemspacings
+\def\itemize{%
+  \ifnum \@itemdepth >\thr@@\@toodeep\else
+    \advance\@itemdepth\@ne
+    \edef\@itemitem{labelitem\romannumeral\the\@itemdepth}%
+    \expandafter
+    \list
+      \csname\@itemitem\endcsname
+      {\@itemspacings\def\makelabel##1{\hss\llap{##1}}}%
+  \fi}
+\def\enumerate{%
+  \ifnum \@enumdepth >\thr@@\@toodeep\else
+    \advance\@enumdepth\@ne
+    \edef\@enumctr{enum\romannumeral\the\@enumdepth}%
+      \expandafter
+      \list
+        \csname label\@enumctr\endcsname
+        {\@itemspacings\usecounter\@enumctr\def\makelabel##1{\hss\llap{##1}}}%
+  \fi}
+\def\description{%
+  \list{}{\labelwidth\z@ \itemindent-\leftmargin
+          \@itemspacings\let\makelabel\descriptionlabel}}
+
+% Bibliography items need to be tightened up.
+% Again, there must be a better way than copying
+% the definitions to modify the list environment...
+\def\thebibliography#1%
+     {\section*{\refname}%
+      \@mkboth{\MakeUppercase\refname}{\MakeUppercase\refname}%
+      \list{\@biblabel{\@arabic\c@enumiv}}%
+           {\settowidth\labelwidth{\@biblabel{#1}}%
+            \leftmargin\labelwidth
+            \advance\leftmargin\labelsep
+            \@openbib@code
+            \usecounter{enumiv}%
+            \let\p@enumiv\@empty
+            \renewcommand\theenumiv{\@arabic\c@enumiv}%
+            \parsep=0pt}% pack entries
+      \sloppy
+      \hbadness=8000% mostly don't whine about bibliography fmt
+      \clubpenalty=4000%
+      \@clubpenalty=\clubpenalty
+      \widowpenalty=4000%
+      \sfcode`\.\@m}
+
+% Floating bodies need to be tightened up.
+\setlength\textfloatsep{14pt plus 2pt}
+\setlength\dbltextfloatsep{\textfloatsep}
+\setlength\intextsep{0.8\textfloatsep}
+\setlength\abovecaptionskip{8pt minus 2pt}
+

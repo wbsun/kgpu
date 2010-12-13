@@ -1,8 +1,11 @@
 #include <cuda.h>
+#include <time.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include "nsk.h"
+
+nsk_task_func_t h_task_funcs[NSK_MAX_TASK_FUNC_NR];
 
 nsk_request_t *h_requests;
 volatile nsk_response_t *h_responses;
@@ -25,14 +28,6 @@ enum mem_mode_t {
     MAPPED,
     WC,
 };
-
-
-typedef struct {
-    void *addr;
-    unsigned int size; // no more than 4GB
-} nsk_buf_info_t;
-
-#define NSK_PROCFS_FILE "/proc/nsk"
 
 #define GIRDS_X 32
 #define BLOCKS_X 32

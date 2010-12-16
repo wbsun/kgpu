@@ -1,7 +1,11 @@
-
+#include <cuda.h>
+#include <time.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include "nsk.h"
+
+nsk_task_func_t h_task_funcs[NSK_MAX_TASK_FUNC_NR];
 
 nsk_request_t *h_requests;
 volatile nsk_response_t *h_responses;
@@ -18,16 +22,35 @@ int current = 0;
 int last = 0;
 int next = 0;
 
-typedef struct {
-    void *addr;
-    unsigned int size; // no more than 4GB
-} nsk_buf_info_t;
+enum mem_mode_t {
+    PINNED,
+    PAGEABLE,
+    MAPPED,
+    WC,
+};
 
+#define GIRDS_X 32
+#define BLOCKS_X 32
+
+#define NOP_TASK 0
 
 dim3 blockdim = dim3(BLOCKS_X,1);
 dim3 griddim = dim3(GRIDS_X,1);
 
 __device__ volatile int slavesdone = 0;
+
+
+__device__ int mythreadid()
+{
+    int row = blockIdx.y*blockDim.y + threadIdx.y;
+    int col = blockIdx.x*blockDim.x + threadIdx.x;
+    return row*(blockDim.x*gridDim.x) + col;
+}
+
+__device__ int myblockid()
+{
+    return blockIdx.y*gridDim.x+blockIdx.x;
+}
 
 __device__ int allslavesdone()
 {
@@ -117,6 +140,16 @@ __global__ void nskmaster(
     }
 }
 
+__device__ void testtask(nsk_hd_request_t *req, int outval)
+{
+    volatile int *odata = req->outputs;
+    volatile int *idata = req->inputs;
+
+    int mytid = mythreadid();
+    odata[mytid] = outval+idata[mytid];
+    __threadfence_system();
+}
+
 __device__ int nop(nsk_hd_request_t *req)
 {
     return 0;
@@ -124,21 +157,26 @@ __device__ int nop(nsk_hd_request_t *req)
 
 __device__ int sha1(nsk_hd_request_t *req)
 {
+    testtask(req, 1);
+    
     return 0;
 }
 
 __device__ int iplookup(nsk_hd_request_t *req)
 {
+    testtask(req, 2);
     return 0;
 }
 
 __device__ int decrypt(nsk_hd_request_t *req)
 {
+    testtask(req, 3);
     return 0;
 }
 
 __device__ int encrypt(nsk_hd_request_t *req)
 {
+    testtask(req, 4);
     return 0;
 }
 

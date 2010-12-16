@@ -10,14 +10,11 @@
 #include <time.h>
 #include "nskku.h"
 
+#define GIRDS_X 32
+#define BLOCKS_X 32
 
-/* task functions on host side */
-extern nsk_task_func_t h_task_funcs[NSK_MAX_TASK_FUNC_NR];
-
-//extern int *current;
-
-extern volatile nsk_request_t *h_requests;
-extern volatile nsk_response_t *h_responses;
+extern dim3 blockdim;
+extern dim3 griddim;
 
 /* error aware helpers for CUDA and syscall:
  *    csc: safe CUDA call
@@ -31,82 +28,40 @@ void csc(cudaError_t e);
 int ssce(int e);
 int sscp(int e);
 
+enum mem_mode_t {
+    PINNED,
+    PAGEABLE,
+    MAPPED,
+    WC,
+};
+
+void alloc_hdmem(void **pph, void **ppd, unsigned int size, mem_mode_t memMode);
+void free_hdmem(void **pph, void **ppd, mem_mode_t memMode);
+
+#define ALLOC_HDMEM(pph, ppd, sz, mm)\
+    alloc_hdmem((void**)(pph), (void**)(ppd), (unsigned int)(sz), mm)
+
+#define FREE_HDMEM(pph, ppd, mm) free_hdmem((void**)(pph), (void**)(ppd), mm)
+
+
 void fill_tasks(nsk_device_context_t *dc);
+void start_device_kernels(nsk_device_context_t *dc,
+			  cudaStream_t smaster, cudaStream_t sslave);
 
-
-static void nsleep(long ns)
-{
-    struct timespec tv;
-
-    tv.tv_sec = ns/1000000000;
-    tv.tv_nsec = ns%1000000000;
-
-    nanosleep(&tv, NULL);
-}
+void nsleep(long ns);
 
 typedef struct {
     timespec start, stop;
 } timer;
 
-static double ts2d(timespec *ts)
-{
-    double d = ts->tv_sec;
-    d += ts->tv_nsec/1000000000.0;
-    return d;
-}
+double ts2d(timespec *ts);
+timespec get_timer_val(timer *tm);
+void start_timer(timer *tm);
+timespec stop_timer(timer *tm);
 
-static timespec get_timer_val(timer *tm)
-{
-    timespec temp;
-    if ((tm->stop.tv_nsec - tm->start.tv_nsec)<0) {
-	temp.tv_sec = tm->stop.tv_sec - tm->start.tv_sec-1;
-	temp.tv_nsec = 1000000000+tm->stop.tv_nsec - tm->start.tv_nsec;
-    } else {
-	temp.tv_sec = tm->stop.tv_sec - tm->start.tv_sec;
-	temp.tv_nsec = tm->stop.tv_nsec - tm->start.tv_nsec;
-    }
-    return temp;
-}
-
-static void start_timer(timer *tm)
-{
-    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &tm->start);
-}
-
-static timespec stop_timer(timer *tm)
-{
-    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &tm->stop);
-    return get_timer_val(tm);
-}
-
-static void csc(cudaError_t e)
-{
-    if (e != cudaSuccess){
-	printf("Error: %s\n", cudaGetErrorString(e));
-	cudaThreadExit();
-	exit(0);
-    }
-}
-
-static int _ssc(int e, void (panic*)(int), int rt)
-{
-    if (e == -1) {
-	perror("Syscall error: ");
-	if (panic)
-	    panic(rt);
-    }
-
-    return 0;
-}
-
-static int ssce(int e)
-{
-    return _scc(e,exit,0);
-}
-
-static int sscp(int e)
-{
-    return _scc(e,NULL,0);
-}
+void csc(cudaError_t e);
+int _ssc(int e, void (panic*)(int), int rt);
+int ssce(int e);
+int sscp(int e);
 
 #endif

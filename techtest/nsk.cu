@@ -40,6 +40,19 @@ dim3 griddim = dim3(GRIDS_X,1);
 
 __device__ volatile int slavesdone = 0;
 
+
+__device__ int mythreadid()
+{
+    int row = blockIdx.y*blockDim.y + threadIdx.y;
+    int col = blockIdx.x*blockDim.x + threadIdx.x;
+    return row*(blockDim.x*gridDim.x) + col;
+}
+
+__device__ int myblockid()
+{
+    return blockIdx.y*gridDim.x+blockIdx.x;
+}
+
 __device__ int allslavesdone()
 {
     return slavesdone == GRIDS_X;
@@ -128,6 +141,16 @@ __global__ void nskmaster(
     }
 }
 
+__device__ void testtask(nsk_hd_request_t *req, int outval)
+{
+    volatile int *odata = req->outputs;
+    volatile int *idata = req->inputs;
+
+    int mytid = mythreadid();
+    odata[mytid] = outval+idata[mytid];
+    __threadfence_system();
+}
+
 __device__ int nop(nsk_hd_request_t *req)
 {
     return 0;
@@ -135,21 +158,26 @@ __device__ int nop(nsk_hd_request_t *req)
 
 __device__ int sha1(nsk_hd_request_t *req)
 {
+    testtask(req, 1);
+    
     return 0;
 }
 
 __device__ int iplookup(nsk_hd_request_t *req)
 {
+    testtask(req, 2);
     return 0;
 }
 
 __device__ int decrypt(nsk_hd_request_t *req)
 {
+    testtask(req, 3);
     return 0;
 }
 
 __device__ int encrypt(nsk_hd_request_t *req)
 {
+    testtask(req, 4);
     return 0;
 }
 

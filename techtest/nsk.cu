@@ -4,14 +4,18 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
 #include "nsk.h"
 
 nsk_task_func_t h_task_funcs[NSK_MAX_TASK_FUNC_NR];
 
 nsk_request_t *h_requests;
-volatile nsk_response_t *h_responses;
+nsk_response_t *h_responses;
 nsk_request_t *k_requests;
-nsk_response_t *K_responses;
+nsk_response_t *k_responses;
 
 nsk_device_context_t *h_dc, *d_dc;
 
@@ -24,8 +28,6 @@ cudaStream_t smaster, sslave, sch2d, scd2h, sdh2d, sdd2h;
 int current = 0;
 int last = 0;
 int next = 0;
-
-#define NOP_TASK 0
 
 dim3 blockdim = dim3(BLOCKS_X,1);
 dim3 griddim = dim3(GRIDS_X,1);
@@ -69,8 +71,8 @@ static void init_context()
 	bufs[i].size = NSK_MEM_SIZE;
     }
     
-    nskkfd = scce(open(NSK_PROCFS_FILE, O_RDWR));
-    scce(write(nskkfd, (void*)bufs, sizeof(nsk_buf_info_t)*4));
+    nskkfd = ssce(open(NSK_PROCFS_FILE, O_RDWR));
+    ssce(write(nskkfd, (void*)bufs, sizeof(nsk_buf_info_t)*4));
     close(nskkfd);  
 
     fill_tasks(h_dc);
@@ -104,7 +106,7 @@ static void cleanup_context()
 
     FREE_HDMEM(&h_responses, &h_dc->responses, PINNED);
     FREE_HDMEM(&h_requests, &h_dc->requests, PINNED);
-    free_hemem(&h_dc, &d_dc, PAGEABLE);
+    FREE_HDMEM(&h_dc, &d_dc, PAGEABLE);
     free(k_requests);
     free(k_responses);
     
@@ -116,7 +118,7 @@ static void cleanup_context()
     csc(cudaStreamDestroy(sdd2h));
 }
 
-static void* get_next_device_mem(int which)
+static volatile void* get_next_device_mem(int which)
 {
     int i;
 
@@ -130,7 +132,7 @@ static void* get_next_device_mem(int which)
     return NULL;
 }
 
-static void put_device_mem(void* devmem)
+static void put_device_mem(volatile void* devmem)
 {
     int i;
 
@@ -152,16 +154,17 @@ static int prepare_task(int next)
     if (d_mem == NULL)
 	return 0;
 
-    csc( cudaMemcpyAsync(d_mem, kreq->inputs, kreq->insize,
+    csc( cudaMemcpyAsync((void*)d_mem, (void*)(kreq->inputs), kreq->insize,
 			 cudaMemcpyHostToDevice,
 			 sch2d));
     memcpy(nreq, kreq, sizeof(nsk_request_t));
     nreq->inputs = d_mem;
-    nreq->outputs = d_mem + (kreq->outputs - kreq->inputs);
+    nreq->outputs = (volatile void*)((char*)d_mem + ((unsigned long)(kreq->outputs)
+						     - (unsigned long)(kreq->inputs)));
 
     nresp->request_id = nreq->request_id;
     nresp->state = NSK_TREADY;
-    nresp->errno = 0;
+    nresp->errno = NSK_ENONE;
     csc( cudaMemcpyAsync((void*)(h_dc->responses+next), (void*)nresp,
 			 sizeof(nsk_response_t), cudaMemcpyHostToDevice, sch2d));
     csc( cudaMemcpyAsync((void*)(h_dc->requests+next), (void*)nreq,
@@ -189,8 +192,8 @@ static void finish_task(int which)
     nsk_request_t *hreq = h_requests+which;
     nsk_request_t *kreq = k_requests+which;
 
-    csc( cudaMemcpyAsync(kreq->outputs, hreq->outputs,
-				 cudaMemcpyDeviceToHost, scd2h));
+    csc( cudaMemcpyAsync((void*)(kreq->outputs), (void*)(hreq->outputs),
+			 kreq->outsize, cudaMemcpyDeviceToHost, scd2h));
     //csc( cudaStreamSynchronize(scd2h));   
 }
 
@@ -269,7 +272,7 @@ static void nskhost()
 
 	    }
 	}
-	if (next == current)) {
+	if (next == current) {
 	    next = poll_next_task();
 	    if (next != current && next != -1) {
 		prepare_task(next);

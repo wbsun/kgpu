@@ -94,7 +94,7 @@ void csc(cudaError_t e)
     }
 }
 
-int _ssc(int e, void (panic*)(int), int rt)
+int ssc(int e, void (*panic)(int), int rt)
 {
     if (e == -1) {
 	perror("Syscall error: ");
@@ -107,10 +107,10 @@ int _ssc(int e, void (panic*)(int), int rt)
 
 int ssce(int e)
 {
-    return _scc(e,exit,0);
+    return ssc(e,exit,0);
 }
 
 int sscp(int e)
 {
-    return _scc(e,NULL,0);
+    return ssc(e,NULL,0);
 }

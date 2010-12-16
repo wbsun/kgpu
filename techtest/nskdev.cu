@@ -1,7 +1,7 @@
 #include <cuda.h>
 #include "nsk.h"
 
-__device__ volatile int slavesdone = 0;
+__device__ volatile int slavesdone;
 
 __device__ int myblockid()
 {
@@ -26,25 +26,33 @@ __device__ void resetslavesdone()
 
 __device__ void slavedone()
 {
-    atomicAdd(&slavesdone,1);
+    atomicAdd((int*)&slavesdone,1);
     __threadfence();
 }
 
 __global__ void nskslave(nsk_device_context_t *dc)
 {
-    __shared__ nsk_request_t *req = NULL;
-    __shared__ int goon = 1;
-    __shared__ int current = 0;
-    __shared__ int newtask = 0;
+    __shared__ nsk_request_t *req;
+    __shared__ int goon;
+    __shared__ int current;
+    __shared__ int newtask;
+
+    if (threadIdx.x == 0) {
+	req = NULL;
+	goon = 1;
+	current = 0;
+	newtask = 0;
+    }
+    __syncthreads();
 
     while(goon){
-	if (threadId.x == 0) {
+	if (threadIdx.x == 0) {
 	    if (current != dc->current) {
 		current = dc->current;
 		if (current == -1)
 		    goon = 0;
 		else {
-		    req = dc->requests+current;
+		    req = (nsk_request_t *)(dc->requests+current);
 		    if (req->taskfunc != NOP_TASK)
 			newtask = 1;
 		}
@@ -56,7 +64,7 @@ __global__ void nskslave(nsk_device_context_t *dc)
 	if (newtask) {
 	    dc->task_funcs[req->taskfunc](req);
 	    __syncthreads();
-	    if (threadIdx == 0) {
+	    if (threadIdx.x == 0) {
 		slavedone();
 		newtask = 0;
 		__threadfence_block();
@@ -69,7 +77,7 @@ __global__ void nskslave(nsk_device_context_t *dc)
 __global__ void nskmaster(
     nsk_device_context_t *dc)
 {
-    int i, current;
+    int current;
     nsk_response_t *resp;
     nsk_request_t *req;
 
@@ -84,7 +92,7 @@ __global__ void nskmaster(
 	    req = dc->requests+current;
 	    resp = dc->responses+current;
 	    
-	    resp->errno = 0;
+	    resp->errno = NSK_ENONE;
 	    if (req->taskfunc == NOP_TASK)
 		resp->state = NSK_TSTOPPED;
 	    else
@@ -101,7 +109,7 @@ __global__ void nskmaster(
     }
 }
 
-__device__ void testtask(nsk_hd_request_t *req, int outval)
+__device__ void testtask(nsk_request_t *req, int outval)
 {
     volatile int *odata = (volatile int*)(req->outputs);
     volatile int *idata = (volatile int*)(req->inputs);
@@ -111,31 +119,31 @@ __device__ void testtask(nsk_hd_request_t *req, int outval)
     __threadfence_system();
 }
 
-__device__ int nop(nsk_hd_request_t *req)
+__device__ int nop(nsk_request_t *req)
 {
     return 0;
 }
 
-__device__ int sha1(nsk_hd_request_t *req)
+__device__ int sha1(nsk_request_t *req)
 {
     testtask(req, 1);
     
     return 0;
 }
 
-__device__ int iplookup(nsk_hd_request_t *req)
+__device__ int iplookup(nsk_request_t *req)
 {
     testtask(req, 2);
     return 0;
 }
 
-__device__ int decrypt(nsk_hd_request_t *req)
+__device__ int decrypt(nsk_request_t *req)
 {
     testtask(req, 3);
     return 0;
 }
 
-__device__ int encrypt(nsk_hd_request_t *req)
+__device__ int encrypt(nsk_request_t *req)
 {
     testtask(req, 4);
     return 0;
@@ -153,7 +161,7 @@ void fill_tasks(nsk_device_context_t *dc)
 	dc->task_funcs[i] = NULL;
 }
 
-void start_device_kernels(nsk_device_context_t *dc, )
+void start_device_kernels(nsk_device_context_t *dc, cudaStream_t smaster, cudaStream_t sslave)
 {    
     nskmaster<<<1,1,0,smaster>>>(dc);
     nskslave<<<griddim, blockdim, 0, sslave>>>(dc);

@@ -10,8 +10,10 @@
 #include <time.h>
 #include "nskku.h"
 
-#define GIRDS_X 32
+#define GRIDS_X 32
 #define BLOCKS_X 32
+
+#define NOP_TASK 0
 
 extern dim3 blockdim;
 extern dim3 griddim;
@@ -24,7 +26,9 @@ extern dim3 griddim;
  *    I know that naming sucks, but those functions are used so
  *    frequently that I just want to type a little bit fewer...
  */
+
 void csc(cudaError_t e);
+int ssc(int e, void (*panic)(int), int rt);
 int ssce(int e);
 int sscp(int e);
 
@@ -58,10 +62,5 @@ double ts2d(timespec *ts);
 timespec get_timer_val(timer *tm);
 void start_timer(timer *tm);
 timespec stop_timer(timer *tm);
-
-void csc(cudaError_t e);
-int _ssc(int e, void (panic*)(int), int rt);
-int ssce(int e);
-int sscp(int e);
 
 #endif

@@ -1,5 +1,4 @@
-#include <cuda.h>
-#include <stdio.h>
+
 #include <string.h>
 #include <unistd.h>
 #include "nsk.h"
@@ -19,25 +18,10 @@ int current = 0;
 int last = 0;
 int next = 0;
 
-enum mem_mode_t {
-    PINNED,
-    PAGEABLE,
-    MAPPED,
-    WC,
-};
-
-
 typedef struct {
     void *addr;
     unsigned int size; // no more than 4GB
 } nsk_buf_info_t;
-
-#define NSK_PROCFS_FILE "/proc/nsk"
-
-#define GIRDS_X 32
-#define BLOCKS_X 32
-
-#define NOP_TASK 0
 
 
 dim3 blockdim = dim3(BLOCKS_X,1);

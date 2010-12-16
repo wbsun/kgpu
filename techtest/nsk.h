@@ -5,6 +5,8 @@
 #ifndef __NSK_H__
 #define __NSK_H__
 
+#include <cuda.h>
+#include <stdio.h>
 #include <time.h>
 
 #define NSK_MAX_TASK_FUNC_NR 8
@@ -12,6 +14,21 @@
 
 /* 8*1024*1024 */
 #define NSK_MEM_SIZE 8388608
+
+#define NSK_PROCFS_FILE "/proc/nsk"
+
+#define GIRDS_X 32
+#define BLOCKS_X 32
+
+#define NOP_TASK 0
+
+enum mem_mode_t {
+    PINNED,
+    PAGEABLE,
+    MAPPED,
+    WC,
+};
+
 
 enum nsk_errno_t {
     NSK_ENMEM,    // no enough memory
@@ -123,6 +140,36 @@ static timespec stop_timer(timer *tm)
 {
     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &tm->stop);
     return get_timer_val(tm);
+}
+
+static void csc(cudaError_t e)
+{
+    if (e != cudaSuccess){
+	printf("Error: %s\n", cudaGetErrorString(e));
+	cudaThreadExit();
+	exit(0);
+    }
+}
+
+static int _ssc(int e, void (panic*)(int), int rt)
+{
+    if (e == -1) {
+	perror("Syscall error: ");
+	if (panic)
+	    panic(rt);
+    }
+
+    return 0;
+}
+
+static int ssce(int e)
+{
+    return _scc(e,exit,0);
+}
+
+static int sscp(int e)
+{
+    return _scc(e,NULL,0);
 }
 
 #endif

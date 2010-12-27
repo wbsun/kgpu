@@ -1,48 +1,6 @@
-#include <cuda.h>
 #include "nsk.h"
-
-void alloc_hdmem(void **pph, void **ppd, unsigned int size, mem_mode_t memMode)
-{
-    switch(memMode) {
-    case PINNED:
-	csc( cudaHostAlloc(pph, size, 0) );
-	csc( cudaMalloc(ppd, size) );
-	break;
-    case PAGEABLE:
-	*pph = malloc(size);
-	csc( cudaMalloc(ppd, size) );
-	break;
-    case MAPPED:
-	csc( cudaHostAlloc(pph, size, cudaHostAllocMapped) );
-	csc( cudaHostGetDevicePointer(ppd, *pph, 0) );
-	break;
-    case WC:
-	csc( cudaHostAlloc(pph, size,
-			   cudaHostAllocMapped|cudaHostAllocWriteCombined) );
-	csc( cudaHostGetDevicePointer(ppd, *pph, 0) );
-    default:
-	break;
-    }
-}
-
-void free_hdmem(void **pph, void **ppd, mem_mode_t memMode)
-{
-    switch(memMode) {
-    case PINNED:
-    case MAPPED:
-    case WC:
-	csc(cudaFreeHost(*pph));
-	break;
-    case PAGEABLE:
-	free(*pph);
-    default:
-	break;
-    }
-
-    *pph = NULL;
-    csc(cudaFree(*ppd));
-    *ppd = NULL;
-}
+#include "hostutils.h"
+#include <stdio.h>
 
 void nsleep(long ns)
 {
@@ -85,19 +43,10 @@ timespec stop_timer(timer *tm)
     return get_timer_val(tm);
 }
 
-void csc(cudaError_t e)
-{
-    if (e != cudaSuccess){
-	printf("Error: %s\n", cudaGetErrorString(e));
-	cudaThreadExit();
-	exit(0);
-    }
-}
-
 int ssc(int e, void (*panic)(int), int rt)
 {
     if (e == -1) {
-	perror("Syscall error: ");
+	perror("nsk Syscall error: ");
 	if (panic)
 	    panic(rt);
     }
@@ -114,3 +63,32 @@ int sscp(int e)
 {
     return ssc(e,NULL,0);
 }
+
+
+volatile void* get_next_host_mem(int user)
+{
+    int i;
+
+    for (i=0; i<4; i++) {
+	if (hostmemuses[i] == -1) {
+	    hostmemuses[i] = user;
+	    return h_mems[i];
+	}
+    }
+    
+    return NULL;
+}
+
+void put_host_mem(volatile void* hostmem)
+{
+    int i;
+
+    for (i=0; i<4; i++) {
+	if (hostmem == h_mems[i]) {
+	    hostmemuses[i] = -1;
+	    return;
+	}
+    }
+}
+
+

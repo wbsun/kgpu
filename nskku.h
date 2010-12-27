@@ -27,13 +27,13 @@ enum nsk_task_state_t {
 };
 
 typedef struct {
-    int request_id;
-    int taskfunc;
+    volatile int request_id;
+    volatile int taskfunc;
     /* both the data pointers(inputs/outputs) and the data are volatile */
     volatile void *inputs;
     volatile void *outputs;
-    int insize;
-    int outsize;
+    volatile int insize;
+    volatile int outsize;
 } nsk_request_t; // 32 bytes
 
 typedef struct {
@@ -43,7 +43,7 @@ typedef struct {
     char padding[4];
 } nsk_response_t; // 16 bytes
 
-typedef int (*nsk_task_func_t)(nsk_request_t *req);
+typedef int (*nsk_task_func_t)(volatile nsk_request_t *req);
 
 typedef struct {
     volatile int current;
@@ -59,6 +59,6 @@ typedef struct {
     unsigned int size; // no more than 4GB
 } nsk_buf_info_t;
 
-#define NSK_PROCFS_FILE "/proc/nsk"
+#define NSK_PROCFS_FILE "/home/wbsun/nskfake"
 
 #endif

@@ -1,5 +1,11 @@
 obj-m += capp.o
 
+utest:
+	nvcc -arch=sm_20 -c -g nskdev.cu
+	nvcc -arch=sm_20 -c -g nsk.cu
+	nvcc -arch=sm_20 -c -g nskutils.cu
+	nvcc -arch=sm_20 -link -g nskdev.o nskutils.o nsk.o
+
 all:
 	rm build
 	ln -s /lib/modules/$(shell uname -r)/build build

@@ -26,6 +26,8 @@
 #include "build/arch/x86/include/asm/system.h"
 #include "build/arch/x86/include/asm/pgtable.h"
 
+#include "nskku.h"
+
 static int bad_address(void *p)
 {
     unsigned long dummy;
@@ -95,3 +97,70 @@ bad:
     printk(KERN_ALERT "[nskk] Alert: Bad address\n");
     return 0;
 }
+
+static struct proc_dir_entry *reqfile, *respfile;
+
+static int reqf_read(char *buf, char **bufloc, off_t offset, int buflen,
+		     int *eof, void *data)
+{
+    
+}
+
+static int reqf_write(struct file *file, const char *buf, unsigned long count,
+		      void *data)
+{
+}
+
+static int respf_read(char *buf, char **bufloc, off_t offset, int buflen,
+		      int *eof, void *data)
+{
+    
+}
+
+static int respf_write(struct file *file, const char *buf, unsigned long count,
+		       void *data)
+{
+}
+
+static void register_kucommfs(void)
+{
+    reqfile = create_proc_entry(NSK_PROCFS_REQ_FILE, 0777, NULL);
+    respfile = create_proc_entry(NSK_PROCFS_RESP_FILE, 0777, NULL);
+
+    if (reqfile == NULL || respfile == NULL) {
+	remove_proc_entry(NSK_PROCFS_REQ_FILE, NULL);
+	remove_proc_entry(NSK_PROCFS_RESP_FILE, NULL);
+
+	printk(KERN_ALERT "[nskk] Error: Could not initialize proc fs.\n");
+	return;
+    }
+
+    reqfile->read_proc = reqf_read;
+    reqfile->write_proc = reqf_write;
+    reqfile->mode = S_IFREG|S_IRUGO;
+    reqfile->uid = 0;
+    reqfile->gid = 0;
+    reqfile->size = 0;
+
+    respfile->read_proc = respf_read;
+    respfile->write_proc = respf_write;
+    respfile->mode = S_IFREG|S_IRUGO;
+    respfile->uid = 0;
+    respfile->gid = 0;
+    respfile->size = 0;
+}
+
+static int __init nskk_init(void)
+{
+    register_kucommfs();
+    return 0;
+}
+
+static void _exit nskk_exit(void)
+{
+    remove_proc_entry(NSK_PROCFS_REQ_FILE, NULL);
+    remove_proc_entry(NSK_PROCFS_RESP_FILE, NULL);
+}
+
+module_init(nskk_init);
+module_exit(nskk_exit);

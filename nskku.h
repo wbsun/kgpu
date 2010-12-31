@@ -61,4 +61,8 @@ typedef struct {
 
 #define NSK_PROCFS_FILE "/home/wbsun/nskfake"
 
+#define NSK_PROCFS_REQ_FILE "nskrequests"
+#define NSK_PROCFS_RESP_FILE "nskresponses"
+
+
 #endif

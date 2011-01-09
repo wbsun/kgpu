@@ -878,7 +878,7 @@ void transferHostToDevice(uint32_t **deviceMem, uint8_t **hostMem, size_t *size)
 void transferDeviceToHost(uint32_t **deviceMem, uint8_t **hostMemS, size_t *size) {
     cudaError_t cudaerrno;
     scc(cudaMemcpyAsync(*hostMemS, *deviceMem, *size, cudaMemcpyDeviceToHost, 0));
-    scc(cudaThreadSynchronize());    
+    //scc(cudaThreadSynchronize());    
 }
 
 /* Encrypt a single block in and out can overlap. */
@@ -958,6 +958,12 @@ extern "C" void AES_cuda_transfer_key(const AES_KEY *key) {
     scc(cudaMemcpyToArray(arrayDK,0,0, key->rd_key,4*(key->rounds+1)*sizeof(unsigned int), cudaMemcpyHostToDevice));
 
     scc(cudaBindTextureToArray(texref_dk, arrayDK, channelDescDK));
+}
+
+extern "C" void AES_cuda_batchend()
+{
+    cudaError_t cudaerrno;
+    scc(cudaThreadSynchronize());
 }
 
 extern "C" void AES_cuda_finish() {

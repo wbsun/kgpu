@@ -41,6 +41,10 @@ static spinlock_t buflock;
 
 static struct proc_dir_entry *kgpureqfs, *kgpurespfs;
 
+
+static int kgpu_rid_cnt = 0;
+static spinlock_t ridlock;
+
 struct kgpu_req;
 struct kgpu_resp;
 
@@ -61,7 +65,12 @@ struct kgpu_req {
     struct ku_request kureq;
     struct kgpu_resp *resp;
     ku_callback cb;
+    void *data;
 };
+
+/* kgpu's errno */
+#define KGPU_OK 0
+#define KGPU_NO_RESPONSE 1
 
 struct ku_response {
     int id;
@@ -193,6 +202,55 @@ static int reqfs_read(char *buf, char **bufloc,
     return ret;
 }
 
+int call_gpu(struct kgpu_req *req, struct kgpu_resp *resp)
+{
+    req->resp = resp;
+    
+    spin_lock(&reqlock);
+
+    INIT_LIST_HEAD(&req->list);
+    list_add_tail(&req->list, &reqs);
+
+    spin_unlock(&reqlock);
+    return 0;
+}
+EXPORT_SYMBOL(call_gpu);
+
+int next_kgpu_request_id(void)
+{
+    int rt = -1;
+    
+    spin_lock(&ridlock);
+    
+    kgpu_rid_cnt++;
+    if (kgpu_rid_cnt < 0)
+	kgpu_rid_cnt = 0;
+    rt = kgpu_rid_cnt;
+    
+    spin_unlock(&ridlock);
+    return rt;
+}
+EXPORT_SYMBOL(next_kgpu_request_id);
+
+struct kgpu_req* alloc_kgpu_request(void)
+{
+    struct kgpu_req *req = kmalloc(sizeof(struct kgpu_req), GFP_KERNEL);
+    if (req) {
+	req->request_id = next_kgpu_request_id();
+    return req;
+}
+EXPORT_SYMBOL(alloc_kgpu_request);
+
+struct kgpu_resp* alloc_kgpu_response(void)
+{
+    struct kgpu_resp *resp = kmalloc(sizeof(struct kgpu_resp), GFP_KERNEL);
+    if (resp)
+	resp->errno = KGPU_NO_RESPONSE;
+    return resp;
+}
+EXPORT_SYMBOL(alloc_kgpu_response);
+
+
 /*
  * Userspace tells kernel the GPU buffers
  */
@@ -284,12 +342,64 @@ static int respfs_write(struct file *file, const char *buf,
     return count;
 }    
 
-static void init_queues()
+void kgpu_init(void)
 {
     INIT_LIST_HEAD(&reqs);
     INIT_LIST_HEAD(&resps);
+    INIT_LIST_HEAD(&rtdreqs);
+    
     spin_lock_init(&reqlock);
     spin_lock_init(&resplock);
+    spin_lock_init(&rtdreqlock);
 
-    register_procfs();
+    spin_lock_init(&ridlock);
+    spin_lock_init(&buflock);
+
+    kgpureqfs = create_proc_entry(REQ_PROC_FILE, 0777, NULL);
+    kgpurespfs = create_proc_entry(RESP_PROC_FILE, 0777, NULL);
+
+    if (!kgpureqfs || !kgpu_respfs) {
+	remove_proc_entry(REQ_PROC_FILE, NULL);
+	remove_proc_entry(RESP_PROC_FILE, NULL);
+	printk(KERN_ALERT "[kgpu] Error: Could not init proc fs\n");
+	return;
+    }
+
+    kgpureqfs->read_proc = reqfs_read;
+    kgpureqfs->write_proc = reqfs_write;
+    kgpureqfs->owner = THIS_MODULE;
+    kgpureqfs->mode = S_IFREG|S_IRUGO;
+    kgpureqfs->uid = 0;
+    kgpureqfs->gid = 0;
+    kgpureqfs->size = sizeof(struct ku_request);
+
+    kgpurespfs->write_proc = respfs_write;
+    kgpurespfs->owner = THIS_MODULE;
+    kgpureqfs->mode = S_IFREG|S_IRUGO;
+    kgpureqfs->uid = 0;
+    kgpureqfs->gid = 0;
+    kgpureqfs->size = 0;
 }
+EXPORT_SYMBOL(kgpu_init);
+
+void kgpu_cleanup(void)
+{
+    remove_proc_entry(REQ_PROC_FILE, NULL);
+    remove_proc_entry(RESP_PROC_FILE, NULL);
+}
+EXPORT_SYMBOL(kgpu_cleanup);
+
+static int __init mod_init(void)
+{
+    kgpu_init();
+    printk(KERN_INFO "[kgpu] KGPU loaded\n");
+    return 0;
+}
+
+static void __exit mod_exit(void)
+{
+    kgpu_cleanup();
+    printk(KERN_INFO "[kgpu] KGPU unloaded\n");
+}
+
+MODULE_LICENSE("GPL");

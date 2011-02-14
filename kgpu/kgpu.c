@@ -14,7 +14,9 @@
 #include <linux/kthread.h>
 #include <linux/proc_fs.h>
 #include <linux/mm.h>
-#include <asm/uaccess.h>
+#include <linux/mm_types.h>
+#include <linux/string.h>
+#include <linux/uaccess.h>
 #include <asm/page.h>
 #include <asm/page_types.h>
 #include <asm/pgtable.h>
@@ -118,7 +120,7 @@ static unsigned long kgpu_virt2phy(unsigned long vaddr)
 	goto bad;
     }
     if (!pgd_present(*pgd)) {
-	printk(KERN_ALERT "[kgpu] Alert: pgd not present %lu\n", *pgd);
+	printk(KERN_ALERT "[kgpu] Alert: pgd not present %lu\n", pgd_val(*pgd));
 	goto out;
     }
 
@@ -128,7 +130,7 @@ static unsigned long kgpu_virt2phy(unsigned long vaddr)
 	goto bad;
     }
     if (!pud_present(*pud) || pud_large(*pud)) {
-	printk(KERN_ALERT "[kgpu] Alert: pud not present %lu\n", *pud);
+	printk(KERN_ALERT "[kgpu] Alert: pud not present %lu\n", pud_val(*pud));
 	goto out;
     }
 
@@ -138,7 +140,7 @@ static unsigned long kgpu_virt2phy(unsigned long vaddr)
 	goto bad;
     }
     if (!pmd_present(*pmd) || pmd_large(*pmd)) {
-	printk(KERN_ALERT "[kgpu] Alert: pmd not present %lu\n", *md);
+	printk(KERN_ALERT "[kgpu] Alert: pmd not present %lu\n", pmd_val(*pmd));
 	goto out;
     }
 
@@ -148,7 +150,7 @@ static unsigned long kgpu_virt2phy(unsigned long vaddr)
 	goto bad;
     }    
     if (!pte_present(*pte)) {
-	printk(KERN_ALERT "[kgpu] Alert: pte not present %lu\n", *pte);
+	printk(KERN_ALERT "[kgpu] Alert: pte not present %lu\n", pte_val(*pte));
 	goto out;
     }
 
@@ -171,7 +173,7 @@ static int reqfs_read(char *buf, char **bufloc,
 {
     int ret;
     struct list_head *r;
-    kgpu_req *req = NULL;
+    struct kgpu_req *req = NULL;
     ret = 0;
 
     spin_lock(&reqlock);
@@ -179,7 +181,7 @@ static int reqfs_read(char *buf, char **bufloc,
     if (!list_empty(&reqs)) {
 	r = reqs.next;
 	list_del(r);
-	req = list_entry(r, kgpu_req, list);
+	req = list_entry(r, struct kgpu_req, list);
 	if (req) {
 	    copy_to_user(buf, (char*)&(req->kureq), sizeof(struct ku_request));
 	    ret = sizeof(struct ku_request);
@@ -236,7 +238,8 @@ struct kgpu_req* alloc_kgpu_request(void)
 {
     struct kgpu_req *req = kmalloc(sizeof(struct kgpu_req), GFP_KERNEL);
     if (req) {
-	req->request_id = next_kgpu_request_id();
+	req->kureq.id = next_kgpu_request_id();
+    }
     return req;
 }
 EXPORT_SYMBOL(alloc_kgpu_request);
@@ -245,7 +248,7 @@ struct kgpu_resp* alloc_kgpu_response(void)
 {
     struct kgpu_resp *resp = kmalloc(sizeof(struct kgpu_resp), GFP_KERNEL);
     if (resp)
-	resp->errno = KGPU_NO_RESPONSE;
+	resp->kuresp.errno = KGPU_NO_RESPONSE;
     return resp;
 }
 EXPORT_SYMBOL(alloc_kgpu_response);
@@ -268,9 +271,9 @@ static int reqfs_write(struct file *file, const char *buf,
     spin_lock(&buflock);
 
     for (i=0; i<KGPU_BUF_NR; i++) {
-	copy_from_user(&(kgpu_bufs[i].gb), buf+offset, sizeof(struct gpu_buffer));
-	offset += sizeof(struct gpu_buffer);
-	kgpu_bufs[i].paddr = kgpu_virt2phy((unsigned long)(kgpu_bufs[i].gb.addr));
+	copy_from_user(&(kgpu_bufs[i].gb), buf+off, sizeof(struct gpu_buffer));
+	off += sizeof(struct gpu_buffer);
+	kgpu_bufs[i].paddr = (void*)kgpu_virt2phy((unsigned long)(kgpu_bufs[i].gb.addr));
     }
 
     spin_unlock(&buflock);
@@ -287,18 +290,18 @@ static struct kgpu_req* find_request(int id, int offlist)
 {
     struct kgpu_req *pos, *n;
 
-    spin_lock(&rtdreqs);
+    spin_lock(&rtdreqlock);
     
     list_for_each_entry_safe(pos, n, &rtdreqs, list) {
-	if (pos->id == id) {
+	if (pos->kureq.id == id) {
 	    if (offlist)
-		list_del(pos->list);
-	    spin_unlock(&rtdreqs);
+		list_del(&pos->list);
+	    spin_unlock(&rtdreqlock);
 	    return pos;
 	}
     }
 
-    spin_unlock(&rtdreqs);
+    spin_unlock(&rtdreqlock);
 
     return NULL;
 }
@@ -309,7 +312,6 @@ static struct kgpu_req* find_request(int id, int offlist)
 static int respfs_write(struct file *file, const char *buf,
 			unsigned long count, void *data)
 {
-    int ret;
     struct ku_response kuresp;
     struct kgpu_req *req;
     
@@ -358,7 +360,7 @@ void kgpu_init(void)
     kgpureqfs = create_proc_entry(REQ_PROC_FILE, 0777, NULL);
     kgpurespfs = create_proc_entry(RESP_PROC_FILE, 0777, NULL);
 
-    if (!kgpureqfs || !kgpu_respfs) {
+    if (!kgpureqfs || !kgpurespfs) {
 	remove_proc_entry(REQ_PROC_FILE, NULL);
 	remove_proc_entry(RESP_PROC_FILE, NULL);
 	printk(KERN_ALERT "[kgpu] Error: Could not init proc fs\n");
@@ -367,18 +369,18 @@ void kgpu_init(void)
 
     kgpureqfs->read_proc = reqfs_read;
     kgpureqfs->write_proc = reqfs_write;
-    kgpureqfs->owner = THIS_MODULE;
+    /*kgpureqfs->owner = THIS_MODULE;*/
     kgpureqfs->mode = S_IFREG|S_IRUGO;
     kgpureqfs->uid = 0;
     kgpureqfs->gid = 0;
     kgpureqfs->size = sizeof(struct ku_request);
 
     kgpurespfs->write_proc = respfs_write;
-    kgpurespfs->owner = THIS_MODULE;
-    kgpureqfs->mode = S_IFREG|S_IRUGO;
-    kgpureqfs->uid = 0;
-    kgpureqfs->gid = 0;
-    kgpureqfs->size = 0;
+    /*kgpurespfs->owner = THIS_MODULE;*/
+    kgpurespfs->mode = S_IFREG|S_IRUGO;
+    kgpurespfs->uid = 0;
+    kgpurespfs->gid = 0;
+    kgpurespfs->size = 0;
 }
 EXPORT_SYMBOL(kgpu_init);
 
@@ -401,5 +403,8 @@ static void __exit mod_exit(void)
     kgpu_cleanup();
     printk(KERN_INFO "[kgpu] KGPU unloaded\n");
 }
+
+module_init(mod_init);
+module_exit(mod_exit);
 
 MODULE_LICENSE("GPL");

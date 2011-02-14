@@ -21,69 +21,16 @@
 #include <asm/page_types.h>
 #include <asm/pgtable.h>
 #include <asm/pgtable_types.h>
-
-struct gpu_buffer {
-    void *addr;
-    unsigned long size;
-};
-
-
-struct kgpu_buffer {
-    void *paddr;
-    struct gpu_buffer gb;
-};
-
-#define KGPU_BUF_NR 4
+#include "kgpu.h"
 
 static struct kgpu_buffer kgpu_bufs[KGPU_BUF_NR];
+static int kgpu_buf_uses[KGPU_BUF_NR];
 static spinlock_t buflock;
-
-#define REQ_PROC_FILE "kgpureq"
-#define RESP_PROC_FILE "kgpuresp"
 
 static struct proc_dir_entry *kgpureqfs, *kgpurespfs;
 
-
 static int kgpu_rid_cnt = 0;
 static spinlock_t ridlock;
-
-struct kgpu_req;
-struct kgpu_resp;
-
-typedef int (*ku_callback)(struct kgpu_req *req,
-			   struct kgpu_resp *resp);
-
-struct ku_request {
-    int id;
-    int function;
-    void *input;
-    void *output;
-    unsigned long insize;
-    unsigned long outsize;
-};
-
-struct kgpu_req {
-    struct list_head list;
-    struct ku_request kureq;
-    struct kgpu_resp *resp;
-    ku_callback cb;
-    void *data;
-};
-
-/* kgpu's errno */
-#define KGPU_OK 0
-#define KGPU_NO_RESPONSE 1
-
-struct ku_response {
-    int id;
-    int errno;
-};
-
-struct kgpu_resp {
-    struct list_head list;
-    struct ku_response kuresp;
-    struct kgpu_req *req;
-};
 
 static struct list_head reqs;
 static struct list_head resps;
@@ -92,7 +39,6 @@ static spinlock_t resplock;
 
 static struct list_head rtdreqs;
 static spinlock_t rtdreqlock;
-
 
 static int bad_address(void *p)
 {
@@ -254,6 +200,44 @@ struct kgpu_resp* alloc_kgpu_response(void)
 EXPORT_SYMBOL(alloc_kgpu_response);
 
 
+const struct kgpu_buffer* alloc_gpu_buffer(void)
+{
+    int i;
+    spin_lock(&buflock);
+
+    for (i=0; i<KGPU_BUF_NR; i++) {
+	if (!kgpu_buf_uses[i]) {
+	    kgpu_buf_uses[i] = 1;
+	    spin_unlock(&buflock);
+	    return &(kgpu_bufs[i]);
+	}
+    }
+
+    spin_unlock(&buflock);
+    return NULL;
+}
+EXPORT_SYMBOL(alloc_gpu_buffer);
+
+int free_gpu_buffer(const struct kgpu_buffer *buf)
+{
+    int i;
+
+    spin_lock(&buflock);
+
+    for (i=0; i<KGPU_BUF_NR; i++) {
+	if (buf->paddr == kgpu_bufs[i].paddr) {
+	    kgpu_buf_uses[i] = 0;
+	    spin_unlock(&buflock);
+	    return 0;
+	}
+    }
+
+    spin_unlock(&buflock);
+    return 1;
+}
+EXPORT_SYMBOL(free_gpu_buffer);
+
+
 /*
  * Userspace tells kernel the GPU buffers
  */
@@ -274,6 +258,7 @@ static int reqfs_write(struct file *file, const char *buf,
 	copy_from_user(&(kgpu_bufs[i].gb), buf+off, sizeof(struct gpu_buffer));
 	off += sizeof(struct gpu_buffer);
 	kgpu_bufs[i].paddr = (void*)kgpu_virt2phy((unsigned long)(kgpu_bufs[i].gb.addr));
+	kgpu_buf_uses[i] = 0;
     }
 
     spin_unlock(&buflock);

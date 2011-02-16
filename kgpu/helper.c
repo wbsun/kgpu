@@ -6,10 +6,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
-#include "kgpu.h"
-#include "list.h"
 #include "helper.h"
-#include "service.h"
 
 int reqfd, respfd;
 

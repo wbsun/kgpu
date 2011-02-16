@@ -3,14 +3,12 @@
  *
  * link with -ldl
  */
-#include "service.h"
-#include "list.h"
 #include <string.h>
 #include <dlfcn.h>
 #include <stdio.h>
 #include <glob.h>
 #include <stdlib.h>
-
+#include "helper.h"
 
 struct sitem {
     struct service *s;

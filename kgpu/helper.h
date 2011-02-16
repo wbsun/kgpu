@@ -1,10 +1,8 @@
 #ifndef __HELPER_H__
 #define __HELPER_H__
 
-
-/*#ifdef __cplusplus
-extern "C" {
-#endif*/
+#include "kgpu.h"
+#include "list.h"
 
 struct service;
 
@@ -41,8 +39,6 @@ void free_service_request(struct service_request *sreq);
 int alloc_gpu_buffers(struct gpu_buffer gbufs[], int n, unsigned long size);
 void free_gpu_buffers(struct gpu_buffer gbufs[], int n);
 
-/*#ifdef __cplusplus
-}
-#endif*/
-    
+#include "service.h"
+   
 #endif

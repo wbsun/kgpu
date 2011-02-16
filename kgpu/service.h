@@ -1,8 +1,6 @@
 #ifndef __SERVICE_H__
 #define __SERVICE_H__
 
-/*#define SERVICE_NAME_SIZE 32*/
-
 struct service {
     char name[SERVICE_NAME_SIZE];
     int sid;
@@ -24,7 +22,7 @@ typedef int (*fn_finit_service)(
 struct service * lookup_service(const char *name);
 int register_service(struct service *s, void *libhandle);
 int unregister_service(const char *name);
-int laod_service(const char *libpath);
+int load_service(const char *libpath);
 int load_all_services(const char *libdir);
 int unload_service(const char *name);
 int unload_all_services();

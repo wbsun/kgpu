@@ -2,8 +2,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "helper.h"
-#include "service.h"
-
 
 extern "C" int alloc_gpu_mem(struct service_request *sreq);
 extern "C" void free_gpu_mem(struct service_request *sreq);

@@ -7,13 +7,33 @@
 #include <fcntl.h>
 #include <errno.h>
 #include "kgpu.h"
+#include "list.h"
 
 int reqfd, respfd;
 
 struct gpu_buffer gbufs[KGPU_BUF_NR];
 
-int alloc_gpu_buffers(struct gpu_buffer gbufs[], int n, unsigned long size);
+/* lists of requests of different states */
+LIST_HEAD(all_reqs);
+LIST_HEAD(init_reqs);
+LIST_HEAD(memdone_reqs);
+LIST_HEAD(prepared_reqs);
+LIST_HEAD(running_reqs);
+LIST_HEAD(post_exec_reqs);
+LIST_HEAD(done_reqs);
 
+
+#define ssc(...) _safe_syscall(__VA_ARGS__, __FILE__, __LINE__)
+
+int _safe_syscall(int r, const char *file, int line)
+{
+    if (r<0) {
+	printf("Error in %s:%d, ", file, line);
+	perror("");
+	abort();
+    }
+    return r;
+}
 
 int set_kgpu_buffers(void)
 {
@@ -45,26 +65,132 @@ int init_kgpu(void)
 
     alloc_gpu_buffers(gbufs, KGPU_BUF_NR, KGPU_BUF_SIZE);
     set_kgpu_buffers();
+
+    return 0;
 }
 
-int get_request(struct ku_request *req)
-{
-    int r;
 
-    r = read(reqfd, req, sizeof(struct ku_request));
-    if (r < 0) {
+int send_ku_response(struct ku_response *resp)
+{
+    ssc(write(respfd, resp, sizeof(struct ku_response)));
+    return 0;
+}
+
+
+int get_next_service_request(struct service_request **psreq)
+{
+    int err;
+
+    struct service_request *sreq = alloc_service_request();
+    *psreq = NULL;
+    
+    if (!sreq)
+	return 1;
+
+    err = read(reqfd, &sreq->kureq, sizeof(struct ku_request));
+    if (err < 0) {
 	if (errno == EAGAIN) {
-	    return 0;
+	    return 1;
 	} else {
 	    perror("Read request.");
 	    abort();
 	}
-    } else
-	return 1;
+    } else {
+	get_service(sreq->kureq.sid)->compute_size(sreq);
+	sreq->state = REQ_INIT;
+	sreq->errno = 0;
+	sreq->stream_id = -1;
+	list_add_tail(&initreqs, &sreq->list);
+	list_add_tail(&allreqs, &sreq->glist);
+	*psreq = sreq;
+	return 0;
+    }
 }
 
-int put_response(struct ku_response *resp)
+int service_request_alloc_mem(struct service_request *sreq)
 {
-    ssc(write(respfd, resp, sizeof(struct ku_response)));
+    int r = alloc_gpu_mem(sreq);
+    if (r) {
+	return 1;
+    } else {
+	sreq->state = REQ_MEM_DONE;
+	list_del(&sreq->list);
+	list_add_tail(&memdone_reqs, &sreq->list);
+	return 0;
+    }
+}
+
+int prepare_exec(struct service_request *sreq)
+{
+    if (alloc_stream(sreq)) {
+	return 1;
+    } else {
+	get_service(sreq->kureq.sid)->prepare(sreq);
+	sreq->state = REQ_PREPARED;
+	list_del(&sreq->list);
+	list_add_tail(&prepared_reqs, &sreq->list);
+	return 0;
+    }
+}
+	
+int launch_exec(struct service_request *sreq)
+{
+    int r = get_service(sreq->kureq.sid)->launch(sreq);
+    if (r) {
+	sreq->state = REQ_DONE;
+	sreq->errno = r;
+	list_del(&sreq->list);
+	list_add_tail(&done_reqs, &sreq->list);
+    } else {
+	sreq->state = REQ_RUNNING;
+	list_del(&sreq->list);
+	list_add_tail(&running_reqs, &sreq->list);
+    }
+    return 0;
+}
+
+int post_exec(struct service_request *sreq)
+{
+    if (execution_finished(sreq)) {
+	sreq->state = REQ_POST_EXEC;
+	list_del(&sreq->list);
+	list_add_tail(&post_exec_reqs, &sreq->list);
+	get_service(sreq->kureq.sid)->post(sreq);
+	return 0;
+    }
+
     return 1;
+}
+
+int finish_post(struct service_request *sreq)
+{
+    if (post_finished(sreq)) {
+	sreq->state = REQ_DONE;
+	list_del(&sreq->list);
+	list_add_tail(&done_reqs, &sreq->list);
+	return 0;
+    }
+
+    return 1;
+}
+
+int service_done(struct service_request *sreq)
+{
+    struct ku_response resp;
+
+    resp.id = sreq->kureq.id;
+    resp.errno = sreq->errno;
+
+    send_ku_response(&resp);
+    
+    list_del(&sreq->list);
+    list_del(&sreq->glist);
+    free_gpu_mem(sreq);
+    free_stream(sreq);   
+    free_service_request(sreq);
+    return 0;
+}
+
+int main_loop()
+{
 }

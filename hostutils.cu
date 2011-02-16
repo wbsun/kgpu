@@ -51,7 +51,7 @@ int ssc(int e, void (*panic)(int), int rt)
 	    panic(rt);
     }
 
-    return 0;
+    return e;
 }
 
 int ssce(int e)

@@ -164,3 +164,5 @@ static void _exit nskk_exit(void)
 
 module_init(nskk_init);
 module_exit(nskk_exit);
+
+MODULE_LICENSE("GPL");

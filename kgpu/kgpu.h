@@ -25,7 +25,7 @@ typedef int (*ku_callback)(struct kgpu_req *req,
 
 struct ku_request {
     int id;
-    int function;
+    int sid;
     void *input;
     void *output;
     unsigned long insize;

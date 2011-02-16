@@ -8,6 +8,8 @@
 #include <errno.h>
 #include "kgpu.h"
 #include "list.h"
+#include "helper.h"
+#include "service.h"
 
 int reqfd, respfd;
 
@@ -96,13 +98,22 @@ int get_next_service_request(struct service_request **psreq)
 	    abort();
 	}
     } else {
-	get_service(sreq->kureq.sid)->compute_size(sreq);
-	sreq->state = REQ_INIT;
-	sreq->errno = 0;
-	sreq->stream_id = -1;
-	list_add_tail(&initreqs, &sreq->list);
 	list_add_tail(&allreqs, &sreq->glist);
 	*psreq = sreq;
+	sreq->stream_id = -1;
+	
+	sreq->s = lookup_service(sreq->kureq.sname);
+	if (!sreq->s) {
+	    sreq->errno = KGPU_NO_SERVICE;
+	    sreq->state = REQ_DONE;	    
+	    list_add_tail(&donereqs, &sreq->list);
+	}
+	else {	
+	    sreq->s->compute_size(sreq);
+	    sreq->state = REQ_INIT;
+	    sreq->errno = 0;
+	    list_add_tail(&initreqs, &sreq->list);
+	}
 	return 0;
     }
 }
@@ -125,7 +136,7 @@ int prepare_exec(struct service_request *sreq)
     if (alloc_stream(sreq)) {
 	return 1;
     } else {
-	get_service(sreq->kureq.sid)->prepare(sreq);
+	sreq->s->prepare(sreq);
 	sreq->state = REQ_PREPARED;
 	list_del(&sreq->list);
 	list_add_tail(&prepared_reqs, &sreq->list);
@@ -135,7 +146,7 @@ int prepare_exec(struct service_request *sreq)
 	
 int launch_exec(struct service_request *sreq)
 {
-    int r = get_service(sreq->kureq.sid)->launch(sreq);
+    int r = sreq->s->launch(sreq);
     if (r) {
 	sreq->state = REQ_DONE;
 	sreq->errno = r;
@@ -155,7 +166,7 @@ int post_exec(struct service_request *sreq)
 	sreq->state = REQ_POST_EXEC;
 	list_del(&sreq->list);
 	list_add_tail(&post_exec_reqs, &sreq->list);
-	get_service(sreq->kureq.sid)->post(sreq);
+	sreq->s->post(sreq);
 	return 0;
     }
 

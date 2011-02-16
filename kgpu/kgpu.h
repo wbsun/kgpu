@@ -23,9 +23,11 @@ struct kgpu_resp;
 typedef int (*ku_callback)(struct kgpu_req *req,
 			   struct kgpu_resp *resp);
 
+#define SERVICE_NAME_SIZE 32
+
 struct ku_request {
     int id;
-    int sid;
+    char sname[SERVICE_NAME_SIZE];
     void *input;
     void *output;
     unsigned long insize;
@@ -43,6 +45,7 @@ struct kgpu_req {
 /* kgpu's errno */
 #define KGPU_OK 0
 #define KGPU_NO_RESPONSE 1
+#define KGPU_NO_SERVICE 2
 
 struct ku_response {
     int id;

@@ -36,9 +36,6 @@ void free_stream(struct service_request *sreq);
 struct service_request* alloc_service_request();
 void free_service_request(struct service_request *sreq);
 
-int alloc_gpu_buffers(struct gpu_buffer gbufs[], int n, unsigned long size);
-void free_gpu_buffers(struct gpu_buffer gbufs[], int n);
-
 #include "service.h"
    
 #endif

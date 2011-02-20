@@ -8,9 +8,9 @@
 #include <errno.h>
 #include "helper.h"
 
-int reqfd, respfd;
+static int reqfd, respfd;
 
-struct gpu_buffer gbufs[KGPU_BUF_NR];
+static struct gpu_buffer gbufs[KGPU_BUF_NR];
 
 /* lists of requests of different states */
 LIST_HEAD(all_reqs);
@@ -20,7 +20,6 @@ LIST_HEAD(prepared_reqs);
 LIST_HEAD(running_reqs);
 LIST_HEAD(post_exec_reqs);
 LIST_HEAD(done_reqs);
-
 
 #define ssc(...) _safe_syscall(__VA_ARGS__, __FILE__, __LINE__)
 
@@ -34,11 +33,28 @@ int _safe_syscall(int r, const char *file, int line)
     return r;
 }
 
-int set_kgpu_buffers(void)
+int init_kgpu(void)
 {
-    int len = KGPU_BUF_NR*sizeof(struct gpu_buffer);
-    int r;
+    char fname[128];
+    int  i, len, r;
+    
+    snprintf(fname, 128, "/proc/%s", REQ_PROC_FILE);
+    reqfd = ssc(open(fname, O_RDWR));
 
+    snprintf(fname, 128, "/proc/%s", RESP_PROC_FILE);
+    respfd = ssc(open(fname, O_WRONLY));
+
+    init_gpu();
+
+    /* alloc GPU Pinned memory buffers */
+    for (i=0; i<KGPU_BUF_NR; i++) {
+	gbufs[i].addr = alloc_pinned_mem(KGPU_BUF_SIZE);
+	gbufs[i].size = KGPU_BUF_SIZE;
+    }
+
+    len = KGPU_BUF_NR*sizeof(struct gpu_buffer);
+
+    /* tell kernel the buffers */
     r = write(reqfd, gbufs, len);
     if (r < 0) {
 	perror("Write req file for buffers.");
@@ -48,22 +64,6 @@ int set_kgpu_buffers(void)
 	printf("Write req file for buffers failed!\n");
 	abort();
     }
-
-    return 0;
-}
-
-int init_kgpu(void)
-{
-    char fname[128];
-    
-    snprintf(fname, 128, "/proc/%s", REQ_PROC_FILE);
-    reqfd = ssc(open(fname, O_RDWR));
-
-    snprintf(fname, 128, "/proc/%s", RESP_PROC_FILE);
-    respfd = ssc(open(fname, O_WRONLY));
-
-    alloc_gpu_buffers(gbufs, KGPU_BUF_NR, KGPU_BUF_SIZE);
-    set_kgpu_buffers();
 
     return 0;
 }

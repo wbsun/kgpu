@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <glob.h>
 #include <stdlib.h>
+#include "list.h"
 #include "helper.h"
 
 struct sitem {
@@ -49,7 +50,7 @@ int register_service(struct service *s, void *libhandle)
 
     if (!s)
 	return 1;
-    i = (struct service *)malloc(sizeof(struct service));
+    i = (struct sitem *)malloc(sizeof(struct sitem));
     if (!i)
 	return 1;
 
@@ -74,7 +75,7 @@ static int __unregister_service(struct sitem *i)
 
 int unregister_service(const char *name)
 {
-    return __unregister(lookup_sitem(name));    
+    return __unregister_service(lookup_sitem(name));    
 }
 
 int load_service(const char *libpath)
@@ -96,7 +97,7 @@ int load_service(const char *libpath)
 	{
 	    fprintf(stderr,
 		    "Warning: %s has no service %s\n",
-		    libpath, ((err=dlerror()) == NULL?"", err));
+		    libpath, ((err=dlerror()) == NULL?"": err));
 	    dlclose(lh);
 	} else {
 	    if (init(lh, register_service))
@@ -138,6 +139,7 @@ int load_all_services(const char *dir)
 static int __unload_service(struct sitem* i)
 {
     void *lh;
+    fn_finit_service finit;
     int r=1;
     if (!i)
 	return 1;
@@ -152,7 +154,7 @@ static int __unload_service(struct sitem* i)
 	    {
 		fprintf(stderr,
 			"Warning: failed to unregister service %s\n",
-			name);
+			i->s->name);
 	    } else
 		r = 0;
 	} else {

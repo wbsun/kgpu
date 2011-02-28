@@ -14,15 +14,15 @@ extern "C" int alloc_gpu_mem(struct service_request *sreq);
 extern "C" void free_gpu_mem(struct service_request *sreq);
 extern "C" int alloc_stream(struct service_request *sreq);
 extern "C" void free_stream(struct service_request *sreq);
-extern "C" struct service_request* alloc_service_request();
-extern "C" void free_service_request(struct service_request *sreq);
+//extern "C" struct service_request* alloc_service_request();
+//extern "C" void free_service_request(struct service_request *sreq);
 
 extern "C" int execution_finished(struct service_request *sreq);
 extern "C" int post_finished(struct service_request *sreq);
 
 #define MAX_STREAM_NR 4
 static cudaStream_t streams[MAX_STREAM_NR];
-static int streamuses[MAX_STRAEM_NR];
+static int streamuses[MAX_STREAM_NR];
 
 static const dim3 default_block_size(32,1);
 static const dim3 default_grid_size(512,1);
@@ -66,7 +66,7 @@ static cudaStream_t get_stream(int stid)
 	return streams[stid];
 }
 
-void *alloc_pinned_mem(unsigend long size) {
+void *alloc_pinned_mem(unsigned long size) {
     void *h;
     csc( cudaHostAlloc(&h, size, 0) );
     return h;
@@ -107,9 +107,9 @@ int alloc_gpu_mem(struct service_request *sreq)
 	if (!devbufuses[i]) {
 	    devbufuses[i] = 1;
 	    sreq->dinput = devbufs[i].addr;
-	    (unsigned long)(sreq->doutput) =
+	    sreq->doutput = (void*)(
 		(unsigned long)(sreq->dinput)
-		+ 256*((sreq->kureq.insize/256)? (sreq->kureq.insize/256+1):sreq->kureq.insize/256);
+		+ 256*((sreq->kureq.insize/256)? (sreq->kureq.insize/256+1):sreq->kureq.insize/256));
 	    return 0;
 	}
     }

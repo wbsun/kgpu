@@ -17,11 +17,39 @@
 #include <linux/mm_types.h>
 #include <linux/string.h>
 #include <linux/uaccess.h>
+#include <linux/compiler.h>
+#include <linux/wait.h>
 #include <asm/page.h>
 #include <asm/page_types.h>
 #include <asm/pgtable.h>
 #include <asm/pgtable_types.h>
 #include "kgpu.h"
+
+struct kgpu_buffer {
+    void *paddr;
+    struct gpu_buffer gb;
+};
+
+struct kgpu_req;
+struct kgpu_resp;
+
+typedef int (*ku_callback)(struct kgpu_req *req,
+			   struct kgpu_resp *resp);
+
+struct kgpu_req {
+    struct list_head list;
+    struct ku_request kureq;
+    struct kgpu_resp *resp;
+    ku_callback cb;
+    void *data;
+};
+
+struct kgpu_resp {
+    struct list_head list;
+    struct ku_response kuresp;
+    struct kgpu_req *req;
+};
+
 
 static struct kgpu_buffer kgpu_bufs[KGPU_BUF_NR];
 static int kgpu_buf_uses[KGPU_BUF_NR];
@@ -36,6 +64,7 @@ static struct list_head reqs;
 static struct list_head resps;
 static spinlock_t reqlock;
 static spinlock_t resplock;
+static wait_queue_head_t reqq;
 
 static struct list_head rtdreqs;
 static spinlock_t rtdreqlock;
@@ -120,6 +149,8 @@ static int reqfs_read(char *buf, char **bufloc,
     int ret;
     struct list_head *r;
     struct kgpu_req *req = NULL;
+
+kgpu_fetch_request:
     ret = 0;
 
     spin_lock(&reqlock);
@@ -133,6 +164,15 @@ static int reqfs_read(char *buf, char **bufloc,
 	    ret = sizeof(struct ku_request);
 	}
     } else {
+	/* check if the userspace wants blocking IO */
+	copy_from_user((char*)&ret, buf, sizeof(int));
+	if (ret == -1) {
+	    spin_unlock(&reqlock);
+	    
+	    if (wait_event_interruptible(reqq, (!list_empty(&reqs))))
+		return -ERESTARTSYS;
+	    goto kgpu_fetch_request;
+	}
 	ret = -EAGAIN;
     }
 
@@ -152,13 +192,20 @@ static int reqfs_read(char *buf, char **bufloc,
 
 int call_gpu(struct kgpu_req *req, struct kgpu_resp *resp)
 {
+    int dowake = 0;
     req->resp = resp;
     
     spin_lock(&reqlock);
 
+    if (list_empty(&reqs))
+	dowake = 1;
+
     INIT_LIST_HEAD(&req->list);
     list_add_tail(&req->list, &reqs);
 
+    if (dowake)
+	wake_up_interruptible(&reqq);
+    
     spin_unlock(&reqlock);
     return 0;
 }
@@ -194,7 +241,7 @@ struct kgpu_resp* alloc_kgpu_response(void)
 {
     struct kgpu_resp *resp = kmalloc(sizeof(struct kgpu_resp), GFP_KERNEL);
     if (resp)
-	resp->kuresp.errno = KGPU_NO_RESPONSE;
+	resp->kuresp.errcode = KGPU_NO_RESPONSE;
     return resp;
 }
 EXPORT_SYMBOL(alloc_kgpu_response);
@@ -338,6 +385,8 @@ void kgpu_init(void)
     spin_lock_init(&reqlock);
     spin_lock_init(&resplock);
     spin_lock_init(&rtdreqlock);
+
+    init_waitqueue_head(&reqq);
 
     spin_lock_init(&ridlock);
     spin_lock_init(&buflock);

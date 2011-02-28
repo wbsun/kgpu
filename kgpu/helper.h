@@ -2,7 +2,6 @@
 #define __HELPER_H__
 
 #include "kgpu.h"
-#include "list.h"
 
 struct service;
 
@@ -12,13 +11,11 @@ struct service_request {
     int block_x, block_y;
     int grid_x, grid_y;
     int state;
-    int errno;
+    int errcode;
     int stream_id;
     void *dinput;
     void *doutput;
     void *data;
-    struct list_head glist;
-    struct list_head list;
 };
 
 /* service request states: */
@@ -29,12 +26,13 @@ struct service_request {
 #define REQ_POST_EXEC 5
 #define REQ_DONE 6
 
-int alloc_gpu_mem(struct service_request *sreq);
+/*int alloc_gpu_mem(struct service_request *sreq);
 void free_gpu_mem(struct service_request *sreq);
 int alloc_stream(struct service_request *sreq);
 void free_stream(struct service_request *sreq);
 struct service_request* alloc_service_request();
 void free_service_request(struct service_request *sreq);
+*/
 
 #include "service.h"
    

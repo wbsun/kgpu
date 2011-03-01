@@ -56,8 +56,9 @@ int register_service(struct service *s, void *libhandle)
 
     i->s = s;
     i->libhandle = libhandle;
+    INIT_LIST_HEAD(&i->list);
 
-    list_add_tail(&services, &i->list);
+    list_add_tail(&i->list, &services);
 
     return 0;
 }

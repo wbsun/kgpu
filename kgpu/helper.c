@@ -4,8 +4,11 @@
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <string.h>
+#include <poll.h>
 #include "list.h"
 #include "helper.h"
 
@@ -15,7 +18,7 @@ struct sritem {
     struct list_head list;
 };
 
-static int reqfd, respfd;
+static int devfd;
 
 static struct gpu_buffer gbufs[KGPU_BUF_NR];
 
@@ -53,11 +56,8 @@ int init_kgpu(void)
     char fname[128];
     int  i, len, r;
     
-    snprintf(fname, 128, "/proc/%s", REQ_PROC_FILE);
-    reqfd = ssc(open(fname, O_RDWR));
-
-    snprintf(fname, 128, "/proc/%s", RESP_PROC_FILE);
-    respfd = ssc(open(fname, O_WRONLY));
+    snprintf(fname, 128, "/dev/%s", KGPU_DEV_NAME);
+    devfd = ssc(open(fname, O_RDWR));
 
     init_gpu();
 
@@ -65,18 +65,17 @@ int init_kgpu(void)
     for (i=0; i<KGPU_BUF_NR; i++) {
 	gbufs[i].addr = (void*)alloc_pinned_mem(KGPU_BUF_SIZE);
 	gbufs[i].size = KGPU_BUF_SIZE;
+	dbg("%p \n", gbufs[i].addr);
+	memset(gbufs[i].addr, 0, KGPU_BUF_SIZE);
     }
 
     len = KGPU_BUF_NR*sizeof(struct gpu_buffer);
 
     /* tell kernel the buffers */
-    r = write(reqfd, gbufs, len);
+    r = ioctl(devfd, KGPU_IOC_SET_GPU_BUFS, (unsigned long)gbufs);
+    /*write(reqfd, gbufs, len);*/
     if (r < 0) {
 	perror("Write req file for buffers.");
-	abort();
-    }
-    else if (r != len) {
-	printf("Write req file for buffers failed!\n");
 	abort();
     }
 
@@ -87,9 +86,9 @@ int init_kgpu(void)
 int finit_kgpu(void)
 {
     int i;
-    
-    close(reqfd);
-    close(respfd);
+
+    ioctl(devfd, KGPU_IOC_SET_STOP);
+    close(devfd);
     finit_gpu();
 
     for (i=0; i<KGPU_BUF_NR; i++) {
@@ -100,7 +99,7 @@ int finit_kgpu(void)
 
 int send_ku_response(struct ku_response *resp)
 {
-    ssc(write(respfd, resp, sizeof(struct ku_response)));
+    ssc(write(devfd, resp, sizeof(struct ku_response)));
     return 0;
 }
 
@@ -109,13 +108,18 @@ void fail_request(struct sritem *sreq, int serr)
     sreq->sr.state = REQ_DONE;
     sreq->sr.errcode = serr;
     list_del(&sreq->list);
-    list_add_tail(&done_reqs, &sreq->list);
+    list_add_tail(&sreq->list, &done_reqs);
 }
 
 struct sritem *alloc_service_request()
 {
     struct sritem *s = (struct sritem *)
 	malloc(sizeof(struct sritem));
+    if (s) {
+    	memset(s, 0, sizeof(struct sritem));
+	INIT_LIST_HEAD(&s->list);
+	INIT_LIST_HEAD(&s->glist);
+    }
     return s;
 }
 
@@ -127,40 +131,64 @@ void free_service_request(struct sritem *s)
 int get_next_service_request()
 {
     int err;
+    struct pollfd pfd;
 
-    struct sritem *sreq = alloc_service_request();
-    
-    if (!sreq)
+    struct sritem *sreq;
+
+    dbg("read %s\n", list_empty(&all_reqs)?"blocking":"non-blocking");
+
+    pfd.fd = devfd;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+
+    err = poll(&pfd, 1, list_empty(&all_reqs)? -1:0);
+    if (err == 0 || (err && !(pfd.revents & POLLIN)) ) {
 	return -1;
-
-    /* strange trick to tell the read to be blocking IO */
-    if (list_empty(&all_reqs))
-	sreq->sr.kureq.id = -1;
-
-    err = read(reqfd, &(sreq->sr.kureq), sizeof(struct ku_request));
-    if (err < 0) {
-	if (errno == EAGAIN) {
+    } else if (err == 1 && pfd.revents & POLLIN)
+    {
+	sreq = alloc_service_request();
+    
+	if (!sreq)
 	    return -1;
+
+	err = read(devfd, (char*)(&(sreq->sr.kureq)), sizeof(struct ku_request));
+	if (err <= 0) {
+	    if (errno == EAGAIN || err == 0) {
+		free_service_request(sreq);
+		return -1;
+	    } else {
+		perror("Read request.");
+		abort();
+	    }
 	} else {
-	    perror("Read request.");
-	    abort();
+	
+	    dbg("1st %d %s\n", sreq->sr.kureq.id, sreq->sr.kureq.sname);
+	
+	    list_add_tail(&sreq->glist, &all_reqs);
+	    sreq->sr.stream_id = -1;
+	
+	    sreq->sr.s = lookup_service(sreq->sr.kureq.sname);
+	    if (!sreq->sr.s) {
+		fail_request(sreq, KGPU_NO_SERVICE);
+	    }
+	    else {	
+		sreq->sr.s->compute_size(&sreq->sr);
+		sreq->sr.state = REQ_INIT;
+		sreq->sr.errcode = 0;
+		list_add_tail(&sreq->list, &init_reqs);
+	    }
+	
+	    return 0;
 	}
     } else {
-	list_add_tail(&all_reqs, &sreq->glist);
-	sreq->sr.stream_id = -1;
-	
-	sreq->sr.s = lookup_service(sreq->sr.kureq.sname);
-	if (!sreq->sr.s) {
-	    fail_request(sreq, KGPU_NO_SERVICE);
+	if (err < 0) {
+	    perror("Poll request");
+	    abort();
+	} else {
+	    fprintf(stderr, "Poll returns multiple fd's results\n");
+	    abort();
 	}
-	else {	
-	    sreq->sr.s->compute_size(&sreq->sr);
-	    sreq->sr.state = REQ_INIT;
-	    sreq->sr.errcode = 0;
-	    list_add_tail(&init_reqs, &sreq->list);
-	}
-	return 0;
-    }
+    }    
 }
 
 int service_request_alloc_mem(struct sritem *sreq)
@@ -171,7 +199,7 @@ int service_request_alloc_mem(struct sritem *sreq)
     } else {
 	sreq->sr.state = REQ_MEM_DONE;
 	list_del(&sreq->list);
-	list_add_tail(&memdone_reqs, &sreq->list);
+	list_add_tail(&sreq->list, &memdone_reqs);
 	return 0;
     }
 }
@@ -188,7 +216,7 @@ int prepare_exec(struct sritem *sreq)
 	} else {
 	    sreq->sr.state = REQ_PREPARED;
 	    list_del(&sreq->list);
-	    list_add_tail(&prepared_reqs, &sreq->list);
+	    list_add_tail(&sreq->list, &prepared_reqs);
 	}
     }
 
@@ -203,7 +231,7 @@ int launch_exec(struct sritem *sreq)
     } else {
 	sreq->sr.state = REQ_RUNNING;
 	list_del(&sreq->list);
-	list_add_tail(&running_reqs, &sreq->list);
+	list_add_tail(&sreq->list, &running_reqs);
     }
     return 0;
 }
@@ -215,7 +243,7 @@ int post_exec(struct sritem *sreq)
 	if (!(r = sreq->sr.s->post(&sreq->sr))) {
 	    sreq->sr.state = REQ_POST_EXEC;
 	    list_del(&sreq->list);
-	    list_add_tail(&post_exec_reqs, &sreq->list);
+	    list_add_tail(&sreq->list, &post_exec_reqs);
 	}
 	else
 	    fail_request(sreq, r);
@@ -229,7 +257,7 @@ int finish_post(struct sritem *sreq)
     if (post_finished(&sreq->sr)) {
 	sreq->sr.state = REQ_DONE;
 	list_del(&sreq->list);
-	list_add_tail(&done_reqs, &sreq->list);
+	list_add_tail(&sreq->list, &done_reqs);
 	return 0;
     }
 

@@ -26,13 +26,27 @@ struct service_request {
 #define REQ_POST_EXEC 5
 #define REQ_DONE 6
 
-/*int alloc_gpu_mem(struct service_request *sreq);
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+void init_gpu();
+void finit_gpu();
+
+void *alloc_pinned_mem(unsigned long size);
+void free_pinned_mem(void *p);
+
+int alloc_gpu_mem(struct service_request *sreq);
 void free_gpu_mem(struct service_request *sreq);
 int alloc_stream(struct service_request *sreq);
 void free_stream(struct service_request *sreq);
-struct service_request* alloc_service_request();
-void free_service_request(struct service_request *sreq);
-*/
+
+int execution_finished(struct service_request *sreq);
+int post_finished(struct service_request *sreq);
+
+#ifdef __cplusplus
+}
+#endif
 
 #include "service.h"
    

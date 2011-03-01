@@ -19,43 +19,43 @@
 #include <linux/uaccess.h>
 #include <linux/compiler.h>
 #include <linux/wait.h>
+#include <linux/cdev.h>
+#include <linux/fs.h>
+#include <linux/poll.h>
 #include <asm/page.h>
 #include <asm/page_types.h>
 #include <asm/pgtable.h>
 #include <asm/pgtable_types.h>
-#include "kgpu.h"
+#include <asm/atomic.h>
+#include "_kgpu.h"
 
-struct kgpu_buffer {
-    void *paddr;
-    struct gpu_buffer gb;
+#define KGPU_MAJOR 0
+
+struct kgpu_dev {
+    struct cdev cdev;
+
+    struct kgpu_buffer bufs[KGPU_BUF_NR];
+    int buf_uses[KGPU_BUF_NR];
+    spinlock_t buflock;
+
+    int rid_sequence;
+    spinlock_t ridlock;
+
+    struct list_head reqs;
+    struct list_head resps;
+    spinlock_t reqlock;
+    spinlock_t resplock;
+    wait_queue_head_t reqq;
+
+    struct list_head rtdreqs;
+    spinlock_t rtdreqlock;
 };
 
-struct kgpu_req;
-struct kgpu_resp;
-
-typedef int (*ku_callback)(struct kgpu_req *req,
-			   struct kgpu_resp *resp);
-
-struct kgpu_req {
-    struct list_head list;
-    struct ku_request kureq;
-    struct kgpu_resp *resp;
-    ku_callback cb;
-    void *data;
-};
-
-struct kgpu_resp {
-    struct list_head list;
-    struct ku_response kuresp;
-    struct kgpu_req *req;
-};
-
+static atomic_t kgpudev_av = ATOMIC_INIT(1);
 
 static struct kgpu_buffer kgpu_bufs[KGPU_BUF_NR];
 static int kgpu_buf_uses[KGPU_BUF_NR];
 static spinlock_t buflock;
-
-static struct proc_dir_entry *kgpureqfs, *kgpurespfs;
 
 static int kgpu_rid_cnt = 0;
 static spinlock_t ridlock;
@@ -68,6 +68,10 @@ static wait_queue_head_t reqq;
 
 static struct list_head rtdreqs;
 static spinlock_t rtdreqlock;
+
+static struct cdev kgpudev;
+
+static int kgpu_major;
 
 static int bad_address(void *p)
 {
@@ -88,13 +92,13 @@ static unsigned long kgpu_virt2phy(unsigned long vaddr)
 
     /* to lock the page */
     struct page *pg;
-    unsigned long paddr;
+    unsigned long paddr = 0;
 
     if (bad_address(pgd)) {
 	printk(KERN_ALERT "[kgpu] Alert: bad address of pgd %p\n", pgd);
 	goto bad;
     }
-    if (!pgd_present(*pgd)) {
+    if (pgd_none(*pgd) || pgd_bad(*pgd)) {
 	printk(KERN_ALERT "[kgpu] Alert: pgd not present %lu\n", pgd_val(*pgd));
 	goto out;
     }
@@ -104,7 +108,7 @@ static unsigned long kgpu_virt2phy(unsigned long vaddr)
 	printk(KERN_ALERT "[kgpu] Alert: bad address of pud %p\n", pud);
 	goto bad;
     }
-    if (!pud_present(*pud) || pud_large(*pud)) {
+    if (pud_none(*pud) || pud_bad(*pud)) {
 	printk(KERN_ALERT "[kgpu] Alert: pud not present %lu\n", pud_val(*pud));
 	goto out;
     }
@@ -114,12 +118,12 @@ static unsigned long kgpu_virt2phy(unsigned long vaddr)
 	printk(KERN_ALERT "[kgpu] Alert: bad address of pmd %p\n", pmd);
 	goto bad;
     }
-    if (!pmd_present(*pmd) || pmd_large(*pmd)) {
+    if (pmd_none(*pmd) || pmd_bad(*pmd)) {
 	printk(KERN_ALERT "[kgpu] Alert: pmd not present %lu\n", pmd_val(*pmd));
 	goto out;
     }
 
-    pte = pte_offset_kernel(pmd, vaddr);
+    pte = pte_offset_map/*kernel*/(pmd, vaddr);
     if (bad_address(pte)) {
 	printk(KERN_ALERT "[kgpu] Alert: bad address of pte %p\n", pte);
 	goto bad;
@@ -139,57 +143,6 @@ bad:
     return 0;
 }
 
-/*
- * Userspace reads a request.
- */
-static int reqfs_read(char *buf, char **bufloc,
-		      off_t offset, int buflen,
-		      int *eof, void *data)
-{
-    int ret;
-    struct list_head *r;
-    struct kgpu_req *req = NULL;
-
-kgpu_fetch_request:
-    ret = 0;
-
-    spin_lock(&reqlock);
-
-    if (!list_empty(&reqs)) {
-	r = reqs.next;
-	list_del(r);
-	req = list_entry(r, struct kgpu_req, list);
-	if (req) {
-	    copy_to_user(buf, (char*)&(req->kureq), sizeof(struct ku_request));
-	    ret = sizeof(struct ku_request);
-	}
-    } else {
-	/* check if the userspace wants blocking IO */
-	copy_from_user((char*)&ret, buf, sizeof(int));
-	if (ret == -1) {
-	    spin_unlock(&reqlock);
-	    
-	    if (wait_event_interruptible(reqq, (!list_empty(&reqs))))
-		return -ERESTARTSYS;
-	    goto kgpu_fetch_request;
-	}
-	ret = -EAGAIN;
-    }
-
-    spin_unlock(&reqlock);
-
-    if (ret > 0 && req) {
-	spin_lock(&rtdreqlock);
-
-	INIT_LIST_HEAD(&req->list);
-	list_add_tail(&req->list, &rtdreqs);
-
-	spin_unlock(&rtdreqlock);
-    }
-
-    return ret;
-}
-
 int call_gpu(struct kgpu_req *req, struct kgpu_resp *resp)
 {
     int dowake = 0;
@@ -203,13 +156,16 @@ int call_gpu(struct kgpu_req *req, struct kgpu_resp *resp)
     INIT_LIST_HEAD(&req->list);
     list_add_tail(&req->list, &reqs);
 
-    if (dowake)
+    /*if (dowake)*/
 	wake_up_interruptible(&reqq);
     
     spin_unlock(&reqlock);
+
+    dbg("[kgpu] DEBUG: call gpu %d\n", req->kureq.id);
+    
     return 0;
 }
-EXPORT_SYMBOL(call_gpu);
+EXPORT_SYMBOL_GPL(call_gpu);
 
 int next_kgpu_request_id(void)
 {
@@ -225,29 +181,44 @@ int next_kgpu_request_id(void)
     spin_unlock(&ridlock);
     return rt;
 }
-EXPORT_SYMBOL(next_kgpu_request_id);
+EXPORT_SYMBOL_GPL(next_kgpu_request_id);
 
 struct kgpu_req* alloc_kgpu_request(void)
 {
     struct kgpu_req *req = kmalloc(sizeof(struct kgpu_req), GFP_KERNEL);
     if (req) {
 	req->kureq.id = next_kgpu_request_id();
+	INIT_LIST_HEAD(&req->list);
+	req->kureq.sname[0] = 0;
     }
     return req;
 }
-EXPORT_SYMBOL(alloc_kgpu_request);
+EXPORT_SYMBOL_GPL(alloc_kgpu_request);
+
+void free_kgpu_request(struct kgpu_req* req)
+{
+    kfree(req);
+}
+EXPORT_SYMBOL_GPL(free_kgpu_request);
 
 struct kgpu_resp* alloc_kgpu_response(void)
 {
     struct kgpu_resp *resp = kmalloc(sizeof(struct kgpu_resp), GFP_KERNEL);
-    if (resp)
+    if (resp) {
 	resp->kuresp.errcode = KGPU_NO_RESPONSE;
+	INIT_LIST_HEAD(&resp->list);
+    }
     return resp;
 }
-EXPORT_SYMBOL(alloc_kgpu_response);
+EXPORT_SYMBOL_GPL(alloc_kgpu_response);
 
+void free_kgpu_response(struct kgpu_resp* resp)
+{
+    kfree(resp);
+}
+EXPORT_SYMBOL_GPL(free_kgpu_response);
 
-const struct kgpu_buffer* alloc_gpu_buffer(void)
+struct kgpu_buffer* alloc_gpu_buffer(void)
 {
     int i;
     spin_lock(&buflock);
@@ -263,9 +234,9 @@ const struct kgpu_buffer* alloc_gpu_buffer(void)
     spin_unlock(&buflock);
     return NULL;
 }
-EXPORT_SYMBOL(alloc_gpu_buffer);
+EXPORT_SYMBOL_GPL(alloc_gpu_buffer);
 
-int free_gpu_buffer(const struct kgpu_buffer *buf)
+int free_gpu_buffer(struct kgpu_buffer *buf)
 {
     int i;
 
@@ -282,36 +253,8 @@ int free_gpu_buffer(const struct kgpu_buffer *buf)
     spin_unlock(&buflock);
     return 1;
 }
-EXPORT_SYMBOL(free_gpu_buffer);
+EXPORT_SYMBOL_GPL(free_gpu_buffer);
 
-
-/*
- * Userspace tells kernel the GPU buffers
- */
-static int reqfs_write(struct file *file, const char *buf,
-		       unsigned long count, void *data)
-{
-    int off = 0;
-    int i;
-    
-    if (count < KGPU_BUF_NR*sizeof(struct gpu_buffer))
-	return -EINVAL; /* too small */
-    else
-	count = KGPU_BUF_NR*sizeof(struct gpu_buffer);
-    
-    spin_lock(&buflock);
-
-    for (i=0; i<KGPU_BUF_NR; i++) {
-	copy_from_user(&(kgpu_bufs[i].gb), buf+off, sizeof(struct gpu_buffer));
-	off += sizeof(struct gpu_buffer);
-	kgpu_bufs[i].paddr = (void*)kgpu_virt2phy((unsigned long)(kgpu_bufs[i].gb.addr));
-	kgpu_buf_uses[i] = 0;
-    }
-
-    spin_unlock(&buflock);
-
-    return count;
-}
 
 /*
  * find request by id in the rtdreqs
@@ -338,46 +281,225 @@ static struct kgpu_req* find_request(int id, int offlist)
     return NULL;
 }
 
-/*
- * Userspace sends response to kernel
- */
-static int respfs_write(struct file *file, const char *buf,
-			unsigned long count, void *data)
+
+int kgpu_open(struct inode *inode, struct file *filp)
+{
+    if (!atomic_dec_and_test(&kgpudev_av)) {
+	atomic_inc(&kgpudev_av);
+	return -EBUSY;
+    }
+
+    filp->private_data = &kgpudev;
+    return 0;
+}
+
+int kgpu_release(struct inode *inode, struct file *file)
+{
+    atomic_set(&kgpudev_av, 1);
+    return 0;
+}
+
+ssize_t kgpu_read(struct file *filp, char __user *buf, size_t c, loff_t *fpos)
+{
+    ssize_t ret = 0;
+    struct list_head *r;
+    struct kgpu_req *req = NULL;
+
+    spin_lock(&reqlock);
+    while (list_empty(&reqs)) {
+	spin_unlock(&reqlock);
+
+	if (filp->f_flags & O_NONBLOCK)
+	    return -EAGAIN;
+
+	dbg("[kgpu] DEBUG: blocking read %s\n", current->comm);
+
+	if (wait_event_interruptible(reqq, (!list_empty(&reqs))))
+	    return -ERESTARTSYS;
+	spin_lock(&reqlock);
+    }
+
+    r = reqs.next;
+    list_del(r);
+    req = list_entry(r, struct kgpu_req, list);
+    if (req) {
+	memcpy/*copy_to_user*/(buf, &req->kureq, sizeof(struct ku_request));
+	ret = c;/*sizeof(struct ku_request);*/
+
+	dbg("[kgpu] DEBUG: one request read %s %d %ld\n",
+	    req->kureq.sname, req->kureq.id, ret);
+    }
+
+    spin_unlock(&reqlock);
+
+    if (ret > 0 && req) {
+	spin_lock(&rtdreqlock);
+
+	INIT_LIST_HEAD(&req->list);
+	list_add_tail(&req->list, &rtdreqs);
+
+	spin_unlock(&rtdreqlock);
+    }
+    
+    dbg("[kgpu] DEBUG: %s read %lu return %ld\n",
+	current->comm, c, ret);
+
+    *fpos += ret;
+
+    return ret;    
+}
+
+ssize_t kgpu_write(struct file *filp, const char __user *buf,
+		   size_t count, loff_t *fpos)
 {
     struct ku_response kuresp;
     struct kgpu_req *req;
+    ssize_t ret = 0;
+    size_t  realcount;
     
     if (count < sizeof(struct ku_response))
-	return -EINVAL; /* Too small. */
+	ret = -EINVAL; /* Too small. */
     else
-	count = sizeof(struct ku_response);
+    {
+	realcount = sizeof(struct ku_response);
 
-    copy_from_user(&kuresp, buf, count);
+	memcpy/*copy_from_user*/(&kuresp, buf, realcount);
 
-    req = find_request(kuresp.id, 1);
-    if (!req)
-	return -EFAULT; /* no request found */
-    
-    memcpy(&(req->resp->kuresp), &kuresp, count);
+	dbg("[kgpu] DEBUG: response ID: %d\n", kuresp.id);
 
-    /*
-     * Different strategy should be applied here:
-     * #1 invoke the callback in the write syscall, like here.
-     * #2 add the resp into the resp-list in the write syscall
-     *    and return, a kernel thread will process the list
-     *    and invoke the callback.
-     *
-     * Currently, the first one is used because this can ensure
-     * the fast response. A kthread may have to sleep so that
-     * the response can't be processed ASAP.
-     */
-    req->cb(req, req->resp);
+	req = find_request(kuresp.id, 1);
+	if (!req)
+	{	    
+	    dbg("[kgpu] DEBUG: no request found for %d\n", kuresp.id);
+	    ret = -EFAULT; /* no request found */
+	} else {
+	    memcpy(&(req->resp->kuresp), &kuresp, realcount);
 
-    return count;
-}    
+	    /*
+	     * Different strategy should be applied here:
+	     * #1 invoke the callback in the write syscall, like here.
+	     * #2 add the resp into the resp-list in the write syscall
+	     *    and return, a kernel thread will process the list
+	     *    and invoke the callback.
+	     *
+	     * Currently, the first one is used because this can ensure
+	     * the fast response. A kthread may have to sleep so that
+	     * the response can't be processed ASAP.
+	     */
+	    req->cb(req, req->resp);
+	    ret = realcount;
+	    *fpos += ret;
+	}
+    }
 
-void kgpu_init(void)
+    dbg("[kgpu] DEBUG: %s write %lu return %ld\n",
+	current->comm, count, ret);
+
+    return ret;
+}
+
+
+static int init_gpu_bufs(char __user *buf)
 {
+    int off=0, i;
+    
+    spin_lock(&buflock);
+
+    for (i=0; i<KGPU_BUF_NR; i++) {
+	copy_from_user(&(kgpu_bufs[i].gb), buf+off, sizeof(struct gpu_buffer));
+
+	off += sizeof(struct gpu_buffer);
+	kgpu_bufs[i].paddr =
+	    (void*)kgpu_virt2phy((unsigned long)(kgpu_bufs[i].gb.addr));
+	kgpu_buf_uses[i] = 0;
+
+	dbg("[kgpu] DEBUG: %p %p %lu\n",
+	    kgpu_bufs[i].gb.addr, kgpu_bufs[i].paddr, kgpu_bufs[i].gb.size);
+    }
+
+    spin_unlock(&buflock);
+   
+    return 0;
+}
+
+static int dump_gpu_bufs(char __user *buf)
+{
+    /* TODO dump kgpu_bufs' gb's to buf */
+    return 0;
+}
+
+long kgpu_ioctl(struct file *filp,
+	       unsigned int cmd, unsigned long arg)
+{
+    int err = 0;
+    
+    if (_IOC_TYPE(cmd) != KGPU_IOC_MAGIC)
+	return -ENOTTY;
+    if (_IOC_NR(cmd) > KGPU_IOC_MAXNR) return -ENOTTY;
+
+    if (_IOC_DIR(cmd) & _IOC_READ)
+	err = !access_ok(VERIFY_WRITE, (void __user *)arg, _IOC_SIZE(cmd));
+    else if (_IOC_DIR(cmd) & _IOC_WRITE)
+	err = !access_ok(VERIFY_READ, (void __user *)arg, _IOC_SIZE(cmd));
+    if (err) return -EFAULT;
+
+    switch (cmd) {
+	
+    case KGPU_IOC_SET_GPU_BUFS:
+	err = init_gpu_bufs((char*)arg);
+	break;
+	
+    case KGPU_IOC_GET_GPU_BUFS:
+	err = dump_gpu_bufs((char*)arg);
+	break;
+
+    case KGPU_IOC_SET_STOP:
+	/*TODO: stop all requests and this module */
+	err = 0;
+	break;
+
+    default:
+	err = -ENOTTY;
+	break;
+    }
+
+    return err;
+}
+
+unsigned int kgpu_poll(struct file *filp, poll_table *wait)
+{
+    unsigned int mask = 0;
+    
+    spin_lock(&reqlock);
+    
+    poll_wait(filp, &reqq, wait);
+
+    if (!list_empty(&reqs)) 
+	mask |= POLLIN | POLLRDNORM;
+
+    mask |= POLLOUT | POLLWRNORM;
+
+    spin_unlock(&reqlock);
+
+    return mask;
+}
+
+struct file_operations kgpu_ops =  {
+    .owner          = THIS_MODULE,
+    .read           = kgpu_read,
+    .write          = kgpu_write,
+    .poll           = kgpu_poll,
+    .unlocked_ioctl = kgpu_ioctl,
+    .open           = kgpu_open,
+    .release        = kgpu_release,
+};
+
+int kgpu_init(void)
+{
+    int result;
+    dev_t dev = 0;
+    int devno;
+    
     INIT_LIST_HEAD(&reqs);
     INIT_LIST_HEAD(&resps);
     INIT_LIST_HEAD(&rtdreqs);
@@ -391,45 +513,41 @@ void kgpu_init(void)
     spin_lock_init(&ridlock);
     spin_lock_init(&buflock);
 
-    kgpureqfs = create_proc_entry(REQ_PROC_FILE, 0777, NULL);
-    kgpurespfs = create_proc_entry(RESP_PROC_FILE, 0777, NULL);
+    result = alloc_chrdev_region(&dev, 0, 1, KGPU_DEV_NAME);
+    kgpu_major = MAJOR(dev);
 
-    if (!kgpureqfs || !kgpurespfs) {
-	remove_proc_entry(REQ_PROC_FILE, NULL);
-	remove_proc_entry(RESP_PROC_FILE, NULL);
-	printk(KERN_ALERT "[kgpu] Error: Could not init proc fs\n");
-	return;
+    if (result < 0) {
+	printk("[kgpu] Error: can't get major\n");
+    } else {
+	printk("[kgpu] Info: major %d\n", kgpu_major);
+	devno = MKDEV(kgpu_major, 0);
+	memset(&kgpudev, 0, sizeof(struct cdev));
+	cdev_init(&kgpudev, &kgpu_ops);
+	kgpudev.owner = THIS_MODULE;
+	kgpudev.ops = &kgpu_ops;
+	result = cdev_add(&kgpudev, devno, 1);
+	if (result) {
+	    printk("[kgpu] Error: can't add device %d", result);
+	}
     }
 
-    kgpureqfs->read_proc = reqfs_read;
-    kgpureqfs->write_proc = reqfs_write;
-    /*kgpureqfs->owner = THIS_MODULE;*/
-    kgpureqfs->mode = S_IFREG|S_IRUGO;
-    kgpureqfs->uid = 0;
-    kgpureqfs->gid = 0;
-    kgpureqfs->size = sizeof(struct ku_request);
-
-    kgpurespfs->write_proc = respfs_write;
-    /*kgpurespfs->owner = THIS_MODULE;*/
-    kgpurespfs->mode = S_IFREG|S_IRUGO;
-    kgpurespfs->uid = 0;
-    kgpurespfs->gid = 0;
-    kgpurespfs->size = 0;
+    return result;
 }
-EXPORT_SYMBOL(kgpu_init);
+EXPORT_SYMBOL_GPL(kgpu_init);
 
 void kgpu_cleanup(void)
 {
-    remove_proc_entry(REQ_PROC_FILE, NULL);
-    remove_proc_entry(RESP_PROC_FILE, NULL);
+    dev_t devno = MKDEV(kgpu_major, 0);
+    cdev_del(&kgpudev);
+
+    unregister_chrdev_region(devno, 1);
 }
-EXPORT_SYMBOL(kgpu_cleanup);
+EXPORT_SYMBOL_GPL(kgpu_cleanup);
 
 static int __init mod_init(void)
 {
-    kgpu_init();
     printk(KERN_INFO "[kgpu] KGPU loaded\n");
-    return 0;
+    return kgpu_init();
 }
 
 static void __exit mod_exit(void)

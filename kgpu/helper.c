@@ -1,3 +1,16 @@
+/*
+ * TODO:
+ *     - In get_next_service_request, read directly, no need of poll because:
+ *         when a service is done, the service_done function will check if
+ *         the global all_reqs list will be empty, if YES: do fcntl to set
+ *         the devfd to be blocking, otherwise keep non-blocking.
+ *         AND in get_next_service_request, when a request is comming, check
+ *         if the global all_reqs list was empty previously, if YES: do
+ *         fcntl to set devfd to be non-blocking, otherwise no change.
+ *
+ *     - Cleanup all headers and sources for well-organized code/defs...
+ *
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -307,7 +320,9 @@ int main_loop()
 	__process_request(prepare_exec, &memdone_reqs, 1);
 	__process_request(service_request_alloc_mem, &init_reqs, 0);
 	get_next_service_request();
+	
 	dbg("one time loop\n");
+	
     }
 
     return 0;

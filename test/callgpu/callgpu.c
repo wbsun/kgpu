@@ -49,14 +49,13 @@ static int __init minit(void)
 	return 0;
     }
     req->data = buf;
-    /*req->kureq.id = next_kgpu_request_id();*/
     resp->kuresp.id = req->kureq.id;
 
     req->kureq.input = buf->gb.addr;
     req->kureq.insize = 1024;
     req->kureq.output = req->kureq.input+1024;
     req->kureq.outsize = 1024;
-    strcpy(req->kureq.sname, "some service");
+    strcpy(req->kureq.sname, "nonexist service");
     req->cb = mycb;
 
     call_gpu(req, resp);

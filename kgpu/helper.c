@@ -80,6 +80,7 @@ int init_kgpu(void)
 	gbufs[i].size = KGPU_BUF_SIZE;
 	dbg("%p \n", gbufs[i].addr);
 	memset(gbufs[i].addr, 0, KGPU_BUF_SIZE);
+	ssc( mlock(gbufs[i].addr, KGPU_BUF_SIZE));
     }
 
     len = KGPU_BUF_NR*sizeof(struct gpu_buffer);
@@ -175,7 +176,8 @@ int get_next_service_request()
 	    }
 	} else {
 	
-	    dbg("1st %d %s\n", sreq->sr.kureq.id, sreq->sr.kureq.sname);
+	    dbg("1st %d %s %p %p %d\n", sreq->sr.kureq.id, sreq->sr.kureq.sname,
+		sreq->sr.kureq.input, sreq->sr.kureq.output, *(int*)(sreq->sr.kureq.input));
 	
 	    list_add_tail(&sreq->glist, &all_reqs);
 	    sreq->sr.stream_id = -1;
@@ -284,6 +286,8 @@ int service_done(struct sritem *sreq)
     resp.id = sreq->sr.kureq.id;
     resp.errcode = sreq->sr.errcode;
 
+    dbg("result: %d\n", *(int*)(sreq->sr.kureq.output));
+
     send_ku_response(&resp);
     
     list_del(&sreq->list);
@@ -331,6 +335,7 @@ int main_loop()
 int main()
 {
     init_kgpu();
+    load_all_services("/home/wbsun/nsk/test/libsrv_test");
     main_loop();
     finit_kgpu();
     return 0;

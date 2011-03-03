@@ -17,8 +17,9 @@
 
 int mycb(struct kgpu_req *req, struct kgpu_resp *resp)
 {
-    printk("[calg2]: REQ ID: %d, RESP ID: %d, RESP CODE: %d\n",
-	   req->kureq.id, resp->kuresp.id, resp->kuresp.errcode);
+    printk("[calg2]: REQ ID: %d, RESP ID: %d, RESP CODE: %d, %d\n",
+	   req->kureq.id, resp->kuresp.id, resp->kuresp.errcode,
+	   *(int*)(__va(((struct kgpu_buffer*)(req->data))->paddr)));
     free_gpu_buffer((struct kgpu_buffer*)(req->data));
     free_kgpu_request(req);
     free_kgpu_response(resp);
@@ -54,11 +55,12 @@ static int __init minit(void)
 
     req->kureq.input = buf->gb.addr;
     req->kureq.insize = 1024;
-    req->kureq.output = req->kureq.input+1024;
+    req->kureq.output = req->kureq.input;/*+1024;*/
     req->kureq.outsize = 1024;
-    strcpy(req->kureq.sname, "some service");
+    strcpy(req->kureq.sname, "test_service");
     req->cb = mycb;
 
+    *(int*)(__va(buf->paddr)) = 100;
     call_gpu(req, resp);
     
     return 0;

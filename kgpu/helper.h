@@ -13,6 +13,7 @@ struct service_request {
     int state;
     int errcode;
     int stream_id;
+    unsigned long stream;
     void *dinput;
     void *doutput;
     void *data;
@@ -30,19 +31,21 @@ struct service_request {
 extern "C" {
 #endif
 
-void init_gpu();
-void finit_gpu();
+    void init_gpu();
+    void finit_gpu();
 
-void *alloc_pinned_mem(unsigned long size);
-void free_pinned_mem(void *p);
+    void *alloc_pinned_mem(unsigned long size);
+    void free_pinned_mem(void *p);
 
-int alloc_gpu_mem(struct service_request *sreq);
-void free_gpu_mem(struct service_request *sreq);
-int alloc_stream(struct service_request *sreq);
-void free_stream(struct service_request *sreq);
+    int alloc_gpu_mem(struct service_request *sreq);
+    void free_gpu_mem(struct service_request *sreq);
+    int alloc_stream(struct service_request *sreq);
+    void free_stream(struct service_request *sreq);
 
-int execution_finished(struct service_request *sreq);
-int post_finished(struct service_request *sreq);
+    int execution_finished(struct service_request *sreq);
+    int post_finished(struct service_request *sreq);
+
+    unsigned long get_stream(int sid);
 
 #ifdef __cplusplus
 }

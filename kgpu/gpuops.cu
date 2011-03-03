@@ -20,6 +20,8 @@ extern "C" void free_stream(struct service_request *sreq);
 extern "C" int execution_finished(struct service_request *sreq);
 extern "C" int post_finished(struct service_request *sreq);
 
+extern "C" unsigned long get_stream(int sid);
+
 #define MAX_STREAM_NR 4
 static cudaStream_t streams[MAX_STREAM_NR];
 static int streamuses[MAX_STREAM_NR];
@@ -58,12 +60,12 @@ void finit_gpu()
     }
 }
 
-static cudaStream_t get_stream(int stid)
+unsigned long get_stream(int stid)
 {
     if (stid < 0 || stid >= MAX_STREAM_NR)
 	return 0;
     else
-	return streams[stid];
+	return (unsigned long)streams[stid];
 }
 
 void *alloc_pinned_mem(unsigned long size) {
@@ -89,13 +91,13 @@ static int __check_stream_done(cudaStream_t s)
 
 int execution_finished(struct service_request *sreq)
 {
-    cudaStream_t s = get_stream(sreq->stream_id);
+    cudaStream_t s = (cudaStream_t)get_stream(sreq->stream_id);
     return __check_stream_done(s);
 }
 
 int post_finished(struct service_request *sreq)
 {
-    cudaStream_t s = get_stream(sreq->stream_id);
+    cudaStream_t s = (cudaStream_t)get_stream(sreq->stream_id);
     return __check_stream_done(s);
 }
 
@@ -107,9 +109,15 @@ int alloc_gpu_mem(struct service_request *sreq)
 	if (!devbufuses[i]) {
 	    devbufuses[i] = 1;
 	    sreq->dinput = devbufs[i].addr;
+
+	    /*
+	     * A good solution is to assign doutput = dinput+insize, but then
+	     * no way to overlap.
+	     * More fields are needed to assign the doutput more effectively.
+	     */
 	    sreq->doutput = (void*)(
 		(unsigned long)(sreq->dinput)
-		+ 256*((sreq->kureq.insize/256)? (sreq->kureq.insize/256+1):sreq->kureq.insize/256));
+		+ (unsigned long)(sreq->kureq.output) - (unsigned long)(sreq->kureq.input));
 	    return 0;
 	}
     }
@@ -136,7 +144,8 @@ int alloc_stream(struct service_request *sreq)
     for (i=0; i<MAX_STREAM_NR; i++) {
 	if (!streamuses[i]) {
 	    streamuses[i] = 1;
-	    sreq->stream_id = i;	    
+	    sreq->stream_id = i;
+	    sreq->stream = (unsigned long)(streams[i]);
 	    return 0;
 	}
     }
@@ -162,14 +171,14 @@ int default_compute_size(struct service_request *sreq)
 
 int default_prepare(struct service_request *sreq)
 {
-    cudaStream_t s = get_stream(sreq->stream_id);
+    cudaStream_t s = (cudaStream_t)get_stream(sreq->stream_id);
     csc( ah2dcpy( sreq->dinput, sreq->kureq.input, sreq->kureq.insize, s) );
     return 0;
 }
 
 int default_post(struct service_request *sreq)
 {
-    cudaStream_t s = get_stream(sreq->stream_id);
+    cudaStream_t s = (cudaStream_t)get_stream(sreq->stream_id);
     csc( ad2hcpy( sreq->kureq.output, sreq->doutput, sreq->kureq.outsize, s) );
     return 0;
 }

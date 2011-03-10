@@ -34,6 +34,7 @@ struct kgpu_resp {
 };
 
 extern int call_gpu(struct kgpu_req*, struct kgpu_resp*);
+extern int call_gpu_sync(struct kgpu_req*, struct kgpu_resp*);
 extern int next_kgpu_request_id(void);
 extern struct kgpu_req* alloc_kgpu_request(void);
 extern struct kgpu_resp* alloc_kgpu_response(void);

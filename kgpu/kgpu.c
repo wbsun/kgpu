@@ -73,6 +73,13 @@ static struct cdev kgpudev;
 
 static int kgpu_major;
 
+struct sync_call_data {
+	wait_queue_head_t queue;
+	void* olddata;
+	ku_callback oldcb;
+	int done;
+};
+
 static int bad_address(void *p)
 {
     unsigned long dummy;
@@ -166,6 +173,58 @@ int call_gpu(struct kgpu_req *req, struct kgpu_resp *resp)
     return 0;
 }
 EXPORT_SYMBOL_GPL(call_gpu);
+
+static int sync_callback(struct kgpu_req *req, struct kgpu_resp *resp)
+{
+	struct sync_call_data *data = (struct sync_call_data*)
+		req->data;
+	
+	data->done = 1;
+		
+	wake_up_interruptible(&data->queue);
+	
+	return 0;
+}
+
+int call_gpu_sync(struct kgpu_req *req, struct kgpu_resp *resp)
+{
+    struct sync_call_data *data = kmalloc(
+	sizeof(struct sync_call_data), GFP_KERNEL);
+    if (!data) {
+	    printk("[kgpu] Error: call_gpu_sync alloc mem failed\n");
+	    return 1;
+    }
+    
+    req->resp = resp;
+    
+    data->olddata = req->data;
+    data->oldcb = req->cb;
+    data->done = 0;
+    init_waitqueue_head(&data->queue);
+    
+    req->data = data;
+    req->cb = sync_callback;
+    
+    spin_lock(&reqlock);
+
+    INIT_LIST_HEAD(&req->list);
+    list_add_tail(&req->list, &reqs);
+
+    wake_up_interruptible(&reqq);
+    
+    spin_unlock(&reqlock);
+
+    dbg("[kgpu] DEBUG: call gpu sync before %d\n", req->kureq.id);
+    wait_event_interruptible(data->queue, (data->done==1));
+    dbg("[kgpu] DEBUG: call gpu sync done %d\n", req->kureq.id);
+    
+    req->data = data->olddata;
+    req->cb = data->oldcb;
+    kfree(data);
+    
+    return 0;
+}
+EXPORT_SYMBOL_GPL(call_gpu_sync);
 
 int next_kgpu_request_id(void)
 {

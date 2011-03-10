@@ -8,8 +8,8 @@ struct gpu_buffer {
     unsigned long size;
 };
 
-#define KGPU_BUF_NR 4
-#define KGPU_BUF_SIZE (16*1024*1024)
+#define KGPU_BUF_NR 128
+#define KGPU_BUF_SIZE (4*1024*1024)
 
 #define REQ_PROC_FILE "kgpureq"
 #define RESP_PROC_FILE "kgpuresp"
@@ -39,8 +39,8 @@ struct ku_response {
 
 #define KGPU_IOC_MAGIC 'g'
 
-#define KGPU_IOC_SET_GPU_BUFS _IOW(KGPU_IOC_MAGIC, 1, struct gpu_buffer[4])
-#define KGPU_IOC_GET_GPU_BUFS _IOR(KGPU_IOC_MAGIC, 2, struct gpu_buffer[4])
+#define KGPU_IOC_SET_GPU_BUFS _IOW(KGPU_IOC_MAGIC, 1, struct gpu_buffer[KGPU_BUF_NR])
+#define KGPU_IOC_GET_GPU_BUFS _IOR(KGPU_IOC_MAGIC, 2, struct gpu_buffer[KGPU_BUF_NR])
 #define KGPU_IOC_SET_STOP     _IO(KGPU_IOC_MAGIC, 3)
 
 #define KGPU_IOC_MAXNR 4

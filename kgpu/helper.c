@@ -37,6 +37,9 @@ static struct gpu_buffer gbufs[KGPU_BUF_NR];
 
 volatile int loop_continue = 1;
 
+static char *service_lib_dir;
+static char *kgpudev;
+
 /* lists of requests of different states */
 LIST_HEAD(all_reqs);
 LIST_HEAD(init_reqs);
@@ -66,11 +69,11 @@ int _safe_syscall(int r, const char *file, int line)
 
 int init_kgpu(void)
 {
-    char fname[128];
+    /*char fname[128];*/
     int  i, len, r;
     
-    snprintf(fname, 128, "/dev/%s", KGPU_DEV_NAME);
-    devfd = ssc(open(fname, O_RDWR));
+    /*(snprintf(fname, 128, "/dev/%s", KGPU_DEV_NAME);*/
+    devfd = ssc(open(kgpudev, O_RDWR));
 
     init_gpu();
 
@@ -87,7 +90,6 @@ int init_kgpu(void)
 
     /* tell kernel the buffers */
     r = ioctl(devfd, KGPU_IOC_SET_GPU_BUFS, (unsigned long)gbufs);
-    /*write(reqfd, gbufs, len);*/
     if (r < 0) {
 	perror("Write req file for buffers.");
 	abort();
@@ -149,7 +151,7 @@ int get_next_service_request()
 
     struct sritem *sreq;
 
-    dbg("read %s\n", list_empty(&all_reqs)?"blocking":"non-blocking");
+    dbg("read is %s\n", list_empty(&all_reqs)?"blocking":"non-blocking");
 
     pfd.fd = devfd;
     pfd.events = POLLIN;
@@ -176,7 +178,7 @@ int get_next_service_request()
 	    }
 	} else {
 	
-	    dbg("1st %d %s %p %p %d\n", sreq->sr.kureq.id, sreq->sr.kureq.sname,
+	    dbg("request %d %s %p %p %d\n", sreq->sr.kureq.id, sreq->sr.kureq.sname,
 		sreq->sr.kureq.input, sreq->sr.kureq.output, *(int*)(sreq->sr.kureq.input));
 	
 	    list_add_tail(&sreq->glist, &all_reqs);
@@ -325,17 +327,38 @@ int main_loop()
 	__process_request(service_request_alloc_mem, &init_reqs, 0);
 	get_next_service_request();
 	
-	dbg("one time loop\n");
+	dbg("one loop\n");
 	
     }
 
     return 0;
 }
 
-int main()
+int main(int argc, char *argv[])
 {
+    int c;
+    kgpudev = "/dev/kgpu";
+    service_lib_dir = "./";
+
+    while ((c = getopt(argc, argv, "d:l:")) != -1)
+    {
+	switch (c)
+	{
+	case 'd':
+	    kgpudev = optarg;
+	    break;
+	case 'l':
+	    service_lib_dir = optarg;
+	    break;
+	default:
+	    fprintf(stderr, "Usage %s [-d device] [-l service_lib_dir]\n",
+		argv[0]);
+	    return 0;
+	}
+    }
+    
     init_kgpu();
-    load_all_services("/home/wbsun/nsk/test/libsrv_test");
+    load_all_services(service_lib_dir);
     main_loop();
     finit_kgpu();
     return 0;

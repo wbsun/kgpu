@@ -8,9 +8,12 @@
 #define dbg(...)
 #endif
 
+#define KGPU_BUF_FRAME_SIZE (4*1024)
+#define KGPU_BUF_FRAME_NR (KGPU_BUF_SIZE/KGPU_BUF_FRAME_SIZE)
+
 struct kgpu_buffer {
-    void *paddr;
     struct gpu_buffer gb;
+    void **paddrs;
 };
 
 struct kgpu_req;

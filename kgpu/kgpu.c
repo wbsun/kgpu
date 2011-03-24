@@ -302,7 +302,7 @@ int free_gpu_buffer(struct kgpu_buffer *buf)
     spin_lock(&buflock);
 
     for (i=0; i<KGPU_BUF_NR; i++) {
-	if (buf->paddr == kgpu_bufs[i].paddr) {
+	if (buf->gb.addr == kgpu_bufs[i].gb.addr) {
 	    kgpu_buf_uses[i] = 0;
 	    spin_unlock(&buflock);
 	    return 0;
@@ -457,23 +457,119 @@ ssize_t kgpu_write(struct file *filp, const char __user *buf,
     return ret;
 }
 
-
-static int init_gpu_bufs(char __user *buf)
+static int check_phy_consecutive(unsigned long vaddr, size_t sz, size_t framesz)
 {
-    int off=0, i;
+    unsigned long paddr, lpa;
+    size_t offset = 0;
+
+    if (framesz == PAGE_SIZE)
+	return 1;
+
+    do {
+	paddr = kgpu_virt2phy(vaddr+offset);
+	lpa = kgpu_virt2phy(vaddr+offset-PAGE_SIZE+framesz);
+	if (!lpa || !paddr) {
+	    printk("[kgpu] Error: PA for 0x%lx or 0x%lx not found\n",
+		   (vaddr+offset), (vaddr+offset-PAGE_SIZE+framesz));
+	    return 0;
+	}
+	
+	if (lpa != paddr+framesz-PAGE_SIZE) {
+	    printk("[kgpu] Error: VA from 0x%lx to 0x%lx not consecutive\n",
+		   (vaddr+offset), (vaddr+offset-PAGE_SIZE+framesz));
+	    return 0;
+	}
+	
+	offset += framesz;
+    } while (offset < sz);
+
+    return 1;    
+}
+
+
+static void dump_pages(unsigned long vaddr, unsigned long sz)
+{
+    void* page;
+    unsigned long offset=0;
+    sz -= PAGE_SIZE;
+
+    do {
+	page = virt_to_page(vaddr+offset);
+	dbg("[kgpu] DEBUG: %s %s %p @ page %p (%p)\n",
+	    (virt_addr_valid(vaddr+offset)?"valid va":"invalid va"),
+	    (virt_addr_valid(page)?"valid page":"invalid page"),
+	    (void*)(vaddr+offset), page, (void*)__pa(page));
+	offset += PAGE_SIZE;
+    } while (offset < sz-1);
+}
+
+
+static void test_pages(unsigned long vaddr, unsigned long sz)
+{
+    int npages = sz/PAGE_SIZE;
+
+    struct page **pages = kmalloc(npages*sizeof(struct page*), GFP_KERNEL);
+
+    int rt;
+    struct vm_area_struct *vma;
+
+    down_read(&current->mm->mmap_sem);
+    rt = get_user_pages(current, current->mm, vaddr, npages,
+			    0, 0, pages, NULL);
+    up_read(&current->mm->mmap_sem);
+
+    vma = find_vma(current->mm, vaddr);
+    if (!vma) {
+	dbg("[kgpu] DEBUG: no VMA for %p\n", (void*)vaddr);
+    } else {
+	dbg("[kgpu] DEBUG: VMA(0x%lx ~ 0x%lx) flags for %p is 0x%lx\n",
+	    vma->vm_start, vma->vm_end,
+	    (void*)vaddr, vma->vm_flags);
+    }
+    
+    if (rt<=0) {
+	dbg("[kgpu] DEBUG: no page pinned %d\n", rt);
+    } else {
+	dbg("[kgpu] DEBUG: get pages\n");
+	for (npages=0; npages<rt; npages++) {
+	    put_page(pages[npages]);
+	}
+    }
+
+    kfree(pages);
+    
+}
+
+static int set_gpu_bufs(char __user *buf)
+{
+    int off=0, i, j;
     
     spin_lock(&buflock);
 
     for (i=0; i<KGPU_BUF_NR; i++) {
 	copy_from_user(&(kgpu_bufs[i].gb), buf+off, sizeof(struct gpu_buffer));
 
+	if (!check_phy_consecutive((unsigned long)(kgpu_bufs[i].gb.addr),
+				   KGPU_BUF_SIZE, KGPU_BUF_FRAME_SIZE)) {
+	    printk("[kgpu] Error: GPU buffer %p is not physically consecutive\n",
+		kgpu_bufs[i].gb.addr);
+	    return -EFAULT;
+	}
+
 	off += sizeof(struct gpu_buffer);
-	kgpu_bufs[i].paddr =
-	    (void*)kgpu_virt2phy((unsigned long)(kgpu_bufs[i].gb.addr));
+	if (!kgpu_bufs[i].paddrs)
+	    kgpu_bufs[i].paddrs = kmalloc(sizeof(void*)*KGPU_BUF_FRAME_NR, GFP_KERNEL);
+	
+	for (j=0; j<KGPU_BUF_FRAME_NR; j++) {
+	    kgpu_bufs[i].paddrs[j] =
+		(void*)kgpu_virt2phy((unsigned long)(kgpu_bufs[i].gb.addr)
+				     +j*KGPU_BUF_FRAME_SIZE); 
+	}
+	
 	kgpu_buf_uses[i] = 0;
 
-	dbg("[kgpu] DEBUG: %p %p %lu\n",
-	    kgpu_bufs[i].gb.addr, kgpu_bufs[i].paddr, kgpu_bufs[i].gb.size);
+	dbg("[kgpu] DEBUG: %p %p\n",
+	    kgpu_bufs[i].gb.addr, kgpu_bufs[i].paddrs[0]);
     }
 
     spin_unlock(&buflock);
@@ -505,7 +601,7 @@ long kgpu_ioctl(struct file *filp,
     switch (cmd) {
 	
     case KGPU_IOC_SET_GPU_BUFS:
-	err = init_gpu_bufs((char*)arg);
+	err = set_gpu_bufs((char*)arg);
 	break;
 	
     case KGPU_IOC_GET_GPU_BUFS:

@@ -5,7 +5,7 @@
 
 struct gpu_buffer {
     void *addr;
-    unsigned long size;
+    /* unsigned long size; */
 };
 
 #define KGPU_BUF_NR 128

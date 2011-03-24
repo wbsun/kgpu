@@ -80,12 +80,11 @@ int init_kgpu(void)
     /* alloc GPU Pinned memory buffers */
     for (i=0; i<KGPU_BUF_NR; i++) {
 	gbufs[i].addr = (void*)alloc_pinned_mem(KGPU_BUF_SIZE);
-	gbufs[i].size = KGPU_BUF_SIZE;
 	dbg("%p \n", gbufs[i].addr);
 	memset(gbufs[i].addr, 0, KGPU_BUF_SIZE);
 	ssc( mlock(gbufs[i].addr, KGPU_BUF_SIZE));
     }
-
+    
     len = KGPU_BUF_NR*sizeof(struct gpu_buffer);
 
     /* tell kernel the buffers */

@@ -3,7 +3,7 @@
 #include <cuda.h>
 #include "../../../kgpu/helper.h"
 #include "../../../kgpu/gputils.h"
-#include "gecbaes.h"
+#include "gecb_aes.h"
 
 
 u32 key_enc[AES_MAX_KEYLENGTH_U32];

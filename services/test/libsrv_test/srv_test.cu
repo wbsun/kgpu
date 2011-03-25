@@ -1,8 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <cuda.h>
-#include "../../kgpu/helper.h"
-#include "../../kgpu/gputils.h"
+#include "../../../kgpu/helper.h"
+#include "../../../kgpu/gputils.h"
 
 
 __global__ void inc_kernel(int *din, int *dout)

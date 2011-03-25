@@ -27,7 +27,7 @@
 #include <asm/pgtable.h>
 #include <asm/pgtable_types.h>
 #include <asm/atomic.h>
-#include "_kgpu.h"
+#include "kkgpu.h"
 
 #define KGPU_MAJOR 0
 

@@ -13,7 +13,7 @@
 #include <linux/uaccess.h>
 #include <asm/page.h>
 
-#include "../../kgpu/_kgpu.h"
+#include "../../../kgpu/kkgpu.h"
 
 int mycb(struct kgpu_req *req, struct kgpu_resp *resp)
 {

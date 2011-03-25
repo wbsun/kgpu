@@ -1,4 +1,8 @@
-
+/*
+ * GPU accelerated AES-ECB cipher
+ * The cipher and the algorithm are binded closely.
+ *
+ */
 #include <crypto/algapi.h>
 #include <linux/err.h>
 #include <linux/init.h>
@@ -8,7 +12,7 @@
 #include <linux/slab.h>
 #include <crypto/aes.h>
 #include <linux/string.h>
-#include "../../kgpu/_kgpu.h"
+#include "../../../kgpu/kkgpu.h"
 
 #define aes_enc_key aes_ctx.key_enc
 #define aes_dec_key aes_ctx.key_dec
@@ -30,7 +34,7 @@ static int crypto_ecb_setkey(struct crypto_tfm *parent, const u8 *key,
     crypto_cipher_set_flags(child, crypto_tfm_get_flags(parent) &
 			    CRYPTO_TFM_REQ_MASK);
 
-    err = crypto_aes_expand_key(&ctx.aes_ctx,
+    err = crypto_aes_expand_key(&ctx->aes_ctx,
 				key, keylen);
     
     crypto_tfm_set_flags(parent, crypto_cipher_get_flags(child) &
@@ -39,7 +43,7 @@ static int crypto_ecb_setkey(struct crypto_tfm *parent, const u8 *key,
 }
 
 static int crypto_ecb_crypt(struct blkcipher_desc *desc,
-			    struct blkcipher_walk *walk,
+                            struct scatterlist *dst, struct scatterlist *src,
 			    unsigned int sz,
 			    int enc)
 {
@@ -54,8 +58,11 @@ static int crypto_ecb_crypt(struct blkcipher_desc *desc,
 
     struct crypto_blkcipher *tfm = desc->tfm;
     struct crypto_gecb_ctx *ctx = crypto_blkcipher_ctx(tfm);
+    struct blkcipher_walk walk;
+
+    blkcipher_walk_init(&walk, dst, src, sz);
     
-    buf = alloc_kgpu_buffer();
+    buf = alloc_gpu_buffer();
     if (!buf) {
 	printk("[gecb] Error: GPU buffer is null.\n");
 	return -EFAULT;
@@ -67,10 +74,10 @@ static int crypto_ecb_crypt(struct blkcipher_desc *desc,
 	return -EFAULT;
     }
 
-    err = blkcipher_walk_virt(desc, walk);
+    err = blkcipher_walk_virt(desc, &walk);
 
-    while ((nbytes = walk->nbytes)) {
-	u8 *wsrc = walk->src.virt.addr;
+    while ((nbytes = walk.nbytes)) {
+	u8 *wsrc = walk.src.virt.addr;
 	if (nbytes > KGPU_BUF_FRAME_SIZE) {
 	    return -EFAULT;
 	}
@@ -83,7 +90,7 @@ static int crypto_ecb_crypt(struct blkcipher_desc *desc,
 	gpos = buf->paddrs[i++];
 	memcpy(__va(gpos), wsrc, nbytes);        
 
-	err = blkcipher_walk_done(desc, walk, nbytes);
+	err = blkcipher_walk_done(desc, &walk, nbytes);
     }
 
     gpos = buf->paddrs[i];
@@ -101,10 +108,10 @@ static int crypto_ecb_crypt(struct blkcipher_desc *desc,
     } else {
 	i=0;
 	blkcipher_walk_init(&walk, dst, src, nbytes);
-	err = blkcipher_walk_virt(desc, walk);
+	err = blkcipher_walk_virt(desc, &walk);
 	
-	while ((nbytes = walk->nbytes)) {
-	    u8 *wdst = walk->dst.virt.addr;
+	while ((nbytes = walk.nbytes)) {
+	    u8 *wdst = walk.dst.virt.addr;
 	    if (nbytes > KGPU_BUF_FRAME_SIZE) {
 		return -EFAULT;
 	    }
@@ -117,13 +124,13 @@ static int crypto_ecb_crypt(struct blkcipher_desc *desc,
 	    gpos = buf->paddrs[i++];
 	    memcpy(wdst, __va(gpos), nbytes);        
 
-	    err = blkcipher_walk_done(desc, walk, nbytes);
+	    err = blkcipher_walk_done(desc, &walk, nbytes);
 	}
     }
     
     free_kgpu_request(req);
     free_kgpu_response(resp);
-    free_kgpu_buffer(buf);
+    free_gpu_buffer(buf);
 
     return err;
 }
@@ -131,21 +138,15 @@ static int crypto_ecb_crypt(struct blkcipher_desc *desc,
 static int crypto_ecb_encrypt(struct blkcipher_desc *desc,
 			      struct scatterlist *dst, struct scatterlist *src,
 			      unsigned int nbytes)
-{
-    struct blkcipher_walk walk;
-
-    blkcipher_walk_init(&walk, dst, src, nbytes);
-    return crypto_ecb_crypt(desc, &walk, nbytes, 1);
+{    
+    return crypto_ecb_crypt(desc, dst, src, nbytes, 1);
 }
 
 static int crypto_ecb_decrypt(struct blkcipher_desc *desc,
 			      struct scatterlist *dst, struct scatterlist *src,
 			      unsigned int nbytes)
 {
-    struct blkcipher_walk walk;
-
-    blkcipher_walk_init(&walk, dst, src, nbytes);
-    return crypto_ecb_crypt(desc, &walk, nbytes, 0);
+    return crypto_ecb_crypt(desc, dst, src, nbytes, 0);
 }
 
 static int crypto_ecb_init_tfm(struct crypto_tfm *tfm)
@@ -165,7 +166,7 @@ static int crypto_ecb_init_tfm(struct crypto_tfm *tfm)
 
 static void crypto_ecb_exit_tfm(struct crypto_tfm *tfm)
 {
-    struct crypto_ecb_ctx *ctx = crypto_tfm_ctx(tfm);
+    struct crypto_gecb_ctx *ctx = crypto_tfm_ctx(tfm);
     crypto_free_cipher(ctx->child);
 }
 

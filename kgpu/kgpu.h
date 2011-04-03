@@ -11,9 +11,6 @@ struct gpu_buffer {
 #define KGPU_BUF_NR 128
 #define KGPU_BUF_SIZE (4*1024*1024)
 
-#define REQ_PROC_FILE "kgpureq"
-#define RESP_PROC_FILE "kgpuresp"
-
 #define KGPU_DEV_NAME "kgpu"
 
 #define SERVICE_NAME_SIZE 32

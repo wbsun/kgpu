@@ -2,6 +2,9 @@
  * GPU accelerated AES-ECB cipher
  * The cipher and the algorithm are binded closely.
  *
+ * This cipher is mostly derived from the crypto/ecb.c in Linux kernel tree.
+ *
+ * The cipher can only handle data with the size of multiples of PAGE_SIZE
  */
 #include <crypto/algapi.h>
 #include <linux/err.h>
@@ -14,16 +17,44 @@
 #include <linux/string.h>
 #include "../../../kgpu/kkgpu.h"
 
-#define aes_enc_key aes_ctx.key_enc
-#define aes_dec_key aes_ctx.key_dec
-#define aes_key_len aes_ctx.key_length
+static void cvt_endian_u32(u32* buf, int n)
+{
+  u8* b = (u8*)buf;
+  int nb = n*4;
+  
+  u8 t;
+  int i;
+  
+  for (i=0; i<nb; i+=4, b+=4) {
+    t = b[0];
+    b[0] = b[3];
+    b[3] = t;
+    
+    t = b[1];
+    b[1] = b[2];
+    b[2] = t;
+  }
+  
+}
 
 struct crypto_gecb_ctx {
     struct crypto_cipher *child;
     struct crypto_aes_ctx aes_ctx;    
+    u8 key[32];
 };
 
-static int crypto_ecb_setkey(struct crypto_tfm *parent, const u8 *key,
+static void dump_page_content(u8 *p)
+{
+    int r,c;
+    printk("dump page content:\n");
+    for (r=0; r<16; r++) {
+	for (c=0; c<32; c++)
+	    printk("%02x ", p[r*32+c]);
+	printk("\n");
+    }
+}
+
+static int crypto_gecb_setkey(struct crypto_tfm *parent, const u8 *key,
 			     unsigned int keylen)
 {
     struct crypto_gecb_ctx *ctx = crypto_tfm_ctx(parent);
@@ -36,13 +67,20 @@ static int crypto_ecb_setkey(struct crypto_tfm *parent, const u8 *key,
 
     err = crypto_aes_expand_key(&ctx->aes_ctx,
 				key, keylen);
+    err = crypto_cipher_setkey(child, key, keylen);
+
+    
+    cvt_endian_u32(ctx->aes_ctx.key_enc, AES_MAX_KEYLENGTH_U32);
+    cvt_endian_u32(ctx->aes_ctx.key_dec, AES_MAX_KEYLENGTH_U32);
+    
+    memcpy(ctx->key, key, keylen);
     
     crypto_tfm_set_flags(parent, crypto_cipher_get_flags(child) &
 			 CRYPTO_TFM_RES_MASK);
     return err;
 }
 
-static int crypto_ecb_crypt(struct blkcipher_desc *desc,
+static int crypto_gecb_crypt(struct blkcipher_desc *desc,
                             struct scatterlist *dst, struct scatterlist *src,
 			    unsigned int sz,
 			    int enc)
@@ -50,7 +88,7 @@ static int crypto_ecb_crypt(struct blkcipher_desc *desc,
     int err=0;
     unsigned int nbytes;
     u8* gpos;
-    int i = 0;
+    int i = 0;    
     
     struct kgpu_req *req;
     struct kgpu_resp *resp;
@@ -59,6 +97,7 @@ static int crypto_ecb_crypt(struct blkcipher_desc *desc,
     struct crypto_blkcipher *tfm = desc->tfm;
     struct crypto_gecb_ctx *ctx = crypto_blkcipher_ctx(tfm);
     struct blkcipher_walk walk;
+
 
     blkcipher_walk_init(&walk, dst, src, sz);
     
@@ -85,29 +124,30 @@ static int crypto_ecb_crypt(struct blkcipher_desc *desc,
 #ifndef _NDEBUG
 	if (nbytes != PAGE_SIZE)
 	    printk("[gecb] WARNING: %u is not PAGE_SIZE\n", nbytes);
+	    
 #endif
 
 	gpos = buf->paddrs[i++];
-	memcpy(__va(gpos), wsrc, nbytes);        
+	memcpy(__va(gpos), wsrc, nbytes);
 
-	err = blkcipher_walk_done(desc, &walk, nbytes);
+	err = blkcipher_walk_done(desc, &walk, 0);
     }
 
     gpos = buf->paddrs[i];
-    memcpy(__va(gpos), &(ctx->aes_ctx), sizeof(struct crypto_aes_ctx));    
+    memcpy(__va(gpos), &(ctx->aes_ctx), sizeof(struct crypto_aes_ctx));   
 
-    strcpy(req->kureq.sname, enc?"aes-enc":"aes-dec");
+    strcpy(req->kureq.sname, enc?"gecb-enc":"gecb-dec");
     req->kureq.input = buf->gb.addr;
     req->kureq.output = buf->gb.addr;
-    req->kureq.insize = PAGE_SIZE*((sz-1)/PAGE_SIZE+1)
-	+ sizeof(struct crypto_aes_ctx);
+    req->kureq.insize = sz+PAGE_SIZE;
     req->kureq.outsize = sz;
 
     if (call_gpu_sync(req, resp)) {
 	err = -EFAULT;
+	printk("[gecb] Error: callgpu error\n");
     } else {
 	i=0;
-	blkcipher_walk_init(&walk, dst, src, nbytes);
+	blkcipher_walk_init(&walk, dst, src, sz);
 	err = blkcipher_walk_virt(desc, &walk);
 	
 	while ((nbytes = walk.nbytes)) {
@@ -121,10 +161,10 @@ static int crypto_ecb_crypt(struct blkcipher_desc *desc,
 		printk("[gecb] WARNING: %u is not PAGE_SIZE\n", nbytes);
 #endif
 
-	    gpos = buf->paddrs[i++];
-	    memcpy(wdst, __va(gpos), nbytes);        
+	    gpos = buf->paddrs[i++];	
+	    memcpy(wdst, __va(gpos), nbytes);       
 
-	    err = blkcipher_walk_done(desc, &walk, nbytes);
+	    err = blkcipher_walk_done(desc, &walk, 0);
 	}
     }
     
@@ -135,21 +175,81 @@ static int crypto_ecb_crypt(struct blkcipher_desc *desc,
     return err;
 }
 
+static int crypto_ecb_crypt(struct blkcipher_desc *desc,
+			    struct blkcipher_walk *walk,
+			    struct crypto_cipher *tfm,
+			    void (*fn)(struct crypto_tfm *, u8 *, const u8 *))
+{
+	int bsize = crypto_cipher_blocksize(tfm);
+	unsigned int nbytes;
+	int err;
+
+	err = blkcipher_walk_virt(desc, walk);
+
+	while ((nbytes = walk->nbytes)) {
+		u8 *wsrc = walk->src.virt.addr;
+		u8 *wdst = walk->dst.virt.addr;
+
+		do {
+			fn(crypto_cipher_tfm(tfm), wdst, wsrc);
+
+			wsrc += bsize;
+			wdst += bsize;
+		} while ((nbytes -= bsize) >= bsize);
+
+		err = blkcipher_walk_done(desc, walk, nbytes);
+	}
+
+	return err;
+}
+
 static int crypto_ecb_encrypt(struct blkcipher_desc *desc,
 			      struct scatterlist *dst, struct scatterlist *src,
 			      unsigned int nbytes)
-{    
-    return crypto_ecb_crypt(desc, dst, src, nbytes, 1);
+{
+	struct blkcipher_walk walk;
+	struct crypto_blkcipher *tfm = desc->tfm;
+	struct crypto_gecb_ctx *ctx = crypto_blkcipher_ctx(tfm);
+	struct crypto_cipher *child = ctx->child;
+
+	blkcipher_walk_init(&walk, dst, src, nbytes);
+	return crypto_ecb_crypt(desc, &walk, child,
+				crypto_cipher_alg(child)->cia_encrypt);
 }
 
 static int crypto_ecb_decrypt(struct blkcipher_desc *desc,
 			      struct scatterlist *dst, struct scatterlist *src,
 			      unsigned int nbytes)
 {
-    return crypto_ecb_crypt(desc, dst, src, nbytes, 0);
+	struct blkcipher_walk walk;
+	struct crypto_blkcipher *tfm = desc->tfm;
+	struct crypto_gecb_ctx *ctx = crypto_blkcipher_ctx(tfm);
+	struct crypto_cipher *child = ctx->child;
+
+	blkcipher_walk_init(&walk, dst, src, nbytes);
+	return crypto_ecb_crypt(desc, &walk, child,
+				crypto_cipher_alg(child)->cia_decrypt);
 }
 
-static int crypto_ecb_init_tfm(struct crypto_tfm *tfm)
+static int crypto_gecb_encrypt(struct blkcipher_desc *desc,
+			      struct scatterlist *dst, struct scatterlist *src,
+			      unsigned int nbytes)
+{    
+    if (nbytes % PAGE_SIZE != 0)
+    	return crypto_ecb_encrypt(desc, dst, src, nbytes);
+    return crypto_gecb_crypt(desc, dst, src, nbytes, 1);
+}
+
+static int crypto_gecb_decrypt(struct blkcipher_desc *desc,
+			      struct scatterlist *dst, struct scatterlist *src,
+			      unsigned int nbytes)
+{
+    if (nbytes % PAGE_SIZE != 0)
+    	return crypto_ecb_decrypt(desc, dst, src, nbytes);
+    return crypto_gecb_crypt(desc, dst, src, nbytes, 0);
+}
+
+static int crypto_gecb_init_tfm(struct crypto_tfm *tfm)
 {
     struct crypto_instance *inst = (void *)tfm->__crt_alg;
     struct crypto_spawn *spawn = crypto_instance_ctx(inst);
@@ -164,13 +264,13 @@ static int crypto_ecb_init_tfm(struct crypto_tfm *tfm)
     return 0;
 }
 
-static void crypto_ecb_exit_tfm(struct crypto_tfm *tfm)
+static void crypto_gecb_exit_tfm(struct crypto_tfm *tfm)
 {
     struct crypto_gecb_ctx *ctx = crypto_tfm_ctx(tfm);
     crypto_free_cipher(ctx->child);
 }
 
-static struct crypto_instance *crypto_ecb_alloc(struct rtattr **tb)
+static struct crypto_instance *crypto_gecb_alloc(struct rtattr **tb)
 {
     struct crypto_instance *inst;
     struct crypto_alg *alg;
@@ -202,19 +302,19 @@ static struct crypto_instance *crypto_ecb_alloc(struct rtattr **tb)
 
     inst->alg.cra_ctxsize = sizeof(struct crypto_gecb_ctx);
 
-    inst->alg.cra_init = crypto_ecb_init_tfm;
-    inst->alg.cra_exit = crypto_ecb_exit_tfm;
+    inst->alg.cra_init = crypto_gecb_init_tfm;
+    inst->alg.cra_exit = crypto_gecb_exit_tfm;
 
-    inst->alg.cra_blkcipher.setkey = crypto_ecb_setkey;
-    inst->alg.cra_blkcipher.encrypt = crypto_ecb_encrypt;
-    inst->alg.cra_blkcipher.decrypt = crypto_ecb_decrypt;
+    inst->alg.cra_blkcipher.setkey = crypto_gecb_setkey;
+    inst->alg.cra_blkcipher.encrypt = crypto_gecb_encrypt;
+    inst->alg.cra_blkcipher.decrypt = crypto_gecb_decrypt;
 
 out_put_alg:
     crypto_mod_put(alg);
     return inst;
 }
 
-static void crypto_ecb_free(struct crypto_instance *inst)
+static void crypto_gecb_free(struct crypto_instance *inst)
 {
     crypto_drop_spawn(crypto_instance_ctx(inst));
     kfree(inst);
@@ -222,23 +322,23 @@ static void crypto_ecb_free(struct crypto_instance *inst)
 
 static struct crypto_template crypto_gecb_tmpl = {
     .name = "gecb",
-    .alloc = crypto_ecb_alloc,
-    .free = crypto_ecb_free,
+    .alloc = crypto_gecb_alloc,
+    .free = crypto_gecb_free,
     .module = THIS_MODULE,
 };
 
-static int __init crypto_ecb_module_init(void)
+static int __init crypto_gecb_module_init(void)
 {
     return crypto_register_template(&crypto_gecb_tmpl);
 }
 
-static void __exit crypto_ecb_module_exit(void)
+static void __exit crypto_gecb_module_exit(void)
 {
     crypto_unregister_template(&crypto_gecb_tmpl);
 }
 
-module_init(crypto_ecb_module_init);
-module_exit(crypto_ecb_module_exit);
+module_init(crypto_gecb_module_init);
+module_exit(crypto_gecb_module_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("gECB block cipher algorithm");

@@ -67,6 +67,20 @@ int _safe_syscall(int r, const char *file, int line)
 #define dbg(...)
 #endif
 
+typedef unsigned char u8;
+
+static void dump_hex(u8* p, int rs, int cs)
+{
+        int r,c;
+        printf("\n");
+        for (r=0; r<rs; r++) {
+                for (c=0; c<cs; c++) {
+                        printf("%02x ", p[r*cs+c]);
+                }
+        	printf("\n");
+        }
+}
+
 int init_kgpu(void)
 {
     /*char fname[128];*/
@@ -80,7 +94,7 @@ int init_kgpu(void)
     /* alloc GPU Pinned memory buffers */
     for (i=0; i<KGPU_BUF_NR; i++) {
 	gbufs[i].addr = (void*)alloc_pinned_mem(KGPU_BUF_SIZE);
-	dbg("%p \n", gbufs[i].addr);
+	/*dbg("%p \n", gbufs[i].addr);*/
 	memset(gbufs[i].addr, 0, KGPU_BUF_SIZE);
 	ssc( mlock(gbufs[i].addr, KGPU_BUF_SIZE));
     }
@@ -150,7 +164,7 @@ int get_next_service_request()
 
     struct sritem *sreq;
 
-    dbg("read is %s\n", list_empty(&all_reqs)?"blocking":"non-blocking");
+    /*dbg("read is %s\n", list_empty(&all_reqs)?"blocking":"non-blocking");*/
 
     pfd.fd = devfd;
     pfd.events = POLLIN;
@@ -177,8 +191,8 @@ int get_next_service_request()
 	    }
 	} else {
 	
-	    dbg("request %d %s %p %p %d\n", sreq->sr.kureq.id, sreq->sr.kureq.sname,
-		sreq->sr.kureq.input, sreq->sr.kureq.output, *(int*)(sreq->sr.kureq.input));
+	    /*dbg("request %d %s %p %p %d\n", sreq->sr.kureq.id, sreq->sr.kureq.sname,
+		sreq->sr.kureq.input, sreq->sr.kureq.output, *(int*)(sreq->sr.kureq.input));*/
 	
 	    list_add_tail(&sreq->glist, &all_reqs);
 	    sreq->sr.stream_id = -1;
@@ -274,6 +288,7 @@ int finish_post(struct sritem *sreq)
 	sreq->sr.state = REQ_DONE;
 	list_del(&sreq->list);
 	list_add_tail(&sreq->list, &done_reqs);
+	
 	return 0;
     }
 
@@ -286,8 +301,6 @@ int service_done(struct sritem *sreq)
 
     resp.id = sreq->sr.kureq.id;
     resp.errcode = sreq->sr.errcode;
-
-    dbg("result: %d\n", *(int*)(sreq->sr.kureq.output));
 
     send_ku_response(&resp);
     
@@ -326,7 +339,7 @@ int main_loop()
 	__process_request(service_request_alloc_mem, &init_reqs, 0);
 	get_next_service_request();
 	
-	dbg("one loop\n");
+	/*dbg("one loop\n");*/
 	
     }
 

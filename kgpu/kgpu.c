@@ -168,7 +168,7 @@ int call_gpu(struct kgpu_req *req, struct kgpu_resp *resp)
     
     spin_unlock(&reqlock);
 
-    dbg("[kgpu] DEBUG: call gpu %d\n", req->kureq.id);
+    /*dbg("[kgpu] DEBUG: call gpu %d\n", req->kureq.id);*/
     
     return 0;
 }
@@ -214,9 +214,9 @@ int call_gpu_sync(struct kgpu_req *req, struct kgpu_resp *resp)
     
     spin_unlock(&reqlock);
 
-    dbg("[kgpu] DEBUG: call gpu sync before %d\n", req->kureq.id);
+    /*dbg("[kgpu] DEBUG: call gpu sync before %d\n", req->kureq.id);*/
     wait_event_interruptible(data->queue, (data->done==1));
-    dbg("[kgpu] DEBUG: call gpu sync done %d\n", req->kureq.id);
+    /*dbg("[kgpu] DEBUG: call gpu sync done %d\n", req->kureq.id);*/
     
     req->data = data->olddata;
     req->cb = data->oldcb;
@@ -371,7 +371,7 @@ ssize_t kgpu_read(struct file *filp, char __user *buf, size_t c, loff_t *fpos)
 	if (filp->f_flags & O_NONBLOCK)
 	    return -EAGAIN;
 
-	dbg("[kgpu] DEBUG: blocking read %s\n", current->comm);
+	/*dbg("[kgpu] DEBUG: blocking read %s\n", current->comm);*/
 
 	if (wait_event_interruptible(reqq, (!list_empty(&reqs))))
 	    return -ERESTARTSYS;
@@ -385,8 +385,8 @@ ssize_t kgpu_read(struct file *filp, char __user *buf, size_t c, loff_t *fpos)
 	memcpy/*copy_to_user*/(buf, &req->kureq, sizeof(struct ku_request));
 	ret = c;/*sizeof(struct ku_request);*/
 
-	dbg("[kgpu] DEBUG: one request read %s %d %ld\n",
-	    req->kureq.sname, req->kureq.id, ret);
+	/*dbg("[kgpu] DEBUG: one request read %s %d %ld\n",
+	    req->kureq.sname, req->kureq.id, ret);*/
     }
 
     spin_unlock(&reqlock);
@@ -400,8 +400,8 @@ ssize_t kgpu_read(struct file *filp, char __user *buf, size_t c, loff_t *fpos)
 	spin_unlock(&rtdreqlock);
     }
     
-    dbg("[kgpu] DEBUG: %s read %lu return %ld\n",
-	current->comm, c, ret);
+    /*dbg("[kgpu] DEBUG: %s read %lu return %ld\n",
+	current->comm, c, ret);*/
 
     *fpos += ret;
 
@@ -424,7 +424,7 @@ ssize_t kgpu_write(struct file *filp, const char __user *buf,
 
 	memcpy/*copy_from_user*/(&kuresp, buf, realcount);
 
-	dbg("[kgpu] DEBUG: response ID: %d\n", kuresp.id);
+	/*dbg("[kgpu] DEBUG: response ID: %d\n", kuresp.id);*/
 
 	req = find_request(kuresp.id, 1);
 	if (!req)
@@ -451,8 +451,8 @@ ssize_t kgpu_write(struct file *filp, const char __user *buf,
 	}
     }
 
-    dbg("[kgpu] DEBUG: %s write %lu return %ld\n",
-	current->comm, count, ret);
+    /*dbg("[kgpu] DEBUG: %s write %lu return %ld\n",
+	current->comm, count, ret);*/
 
     return ret;
 }
@@ -568,8 +568,8 @@ static int set_gpu_bufs(char __user *buf)
 	
 	kgpu_buf_uses[i] = 0;
 
-	dbg("[kgpu] DEBUG: %p %p\n",
-	    kgpu_bufs[i].gb.addr, kgpu_bufs[i].paddrs[0]);
+	/*dbg("[kgpu] DEBUG: %p %p\n",
+	    kgpu_bufs[i].gb.addr, kgpu_bufs[i].paddrs[0]);*/
     }
 
     spin_unlock(&buflock);

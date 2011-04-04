@@ -3,7 +3,7 @@
 #include <cuda.h>
 #include "../../../kgpu/helper.h"
 #include "../../../kgpu/gputils.h"
-#include "gecb_aes.h"
+#include "gaes_ecb.h"
 
 
 #define BYTES_PER_BLOCK  1024

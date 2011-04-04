@@ -321,7 +321,7 @@ static void crypto_gecb_free(struct crypto_instance *inst)
 }
 
 static struct crypto_template crypto_gecb_tmpl = {
-    .name = "gecb",
+    .name = "gaes_ecb",
     .alloc = crypto_gecb_alloc,
     .free = crypto_gecb_free,
     .module = THIS_MODULE,

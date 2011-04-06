@@ -178,6 +178,69 @@ out:
 	return rc;
 }
 
+
+/*
+ * ecryptfs_readpages
+ * This is kernel code, not Java.
+ *
+ * Read in multiple pages and decrypt them if necessary.
+ */
+static int ecryptfs_readpages(struct file *filp, struct address_space *mapping,
+			      struct list_head *pages, unsigned nr_pages)
+{
+    struct ecryptfs_crypt_stat *crypt_stat =
+	&ecryptfs_inode_to_private(mapping->host)->crypt_stat;
+    struct page **pgs;
+    unsigned int page_idx;
+    int rc = 0;
+    int nodec = 0;
+
+    if (!crypt_stat
+	|| !(crypt_stat->flags & ECRYPTFS_ENCRYPTED)
+	|| (crypt_stat->flags & ECRYPTFS_NEW_FILE)
+	|| (crypt_stat->flags & ECRYPTFS_VIEW_AS_ENCRYPTED)) {
+	nodec = 1;
+    }
+
+    if (!nodec) {
+	pgs = kmalloc(sizeof(struct page*)*nr_pages, GFP_KERNEL);
+	if (!pgs) {
+	    return -EFAULT;
+	}
+    }
+
+    for (page_idx = 0; page_idx < nr_pages; page_idx++) {
+	struct page *page = list_entry(pages->prev, struct page, lru);
+	list_del(&page->lru);
+	if (add_to_page_cache_lru(page, mapping,
+				   page->index, GFP_KERNEL)) {
+	    printk("[g-eCryptfs] INFO: cannot add page %lu to cache lru\n",
+		   page->index);
+	} else {
+	    if (nodec)
+		rc |= ecryptfs_readpage(filp, page);
+	}
+
+	if (nodec)
+	    page_cache_release(page);
+	else
+	    pgs[page_idx] = page;	
+    }
+
+    if (!norec) {
+	rc = ecryptfs_decrypt_pages(pgs, nr_pages);
+
+	for (page_idx = 0; page_idx < nr_pages; page_idx++) {
+	    page_cache_release(pgs[page_idx]);
+	}
+
+	kfree(pgs);
+    }
+
+    return rc;
+}
+
+
 /**
  * ecryptfs_readpage
  * @file: An eCryptfs file
@@ -552,7 +615,8 @@ static sector_t ecryptfs_bmap(struct address_space *mapping, sector_t block)
 
 const struct address_space_operations ecryptfs_aops = {
 	.writepage = ecryptfs_writepage,
-	.readpage = ecryptfs_readpage,
+	.readpage  = ecryptfs_readpage,
+	.readpages = ecryptfs_readpages,
 	.write_begin = ecryptfs_write_begin,
 	.write_end = ecryptfs_write_end,
 	.bmap = ecryptfs_bmap,

@@ -285,7 +285,7 @@ static struct crypto_instance *crypto_gecb_alloc(struct rtattr **tb)
     if (IS_ERR(alg))
 	return ERR_CAST(alg);
 
-    inst = crypto_alloc_instance("gecb", alg);
+    inst = crypto_alloc_instance("gaes_ecb", alg);
     if (IS_ERR(inst)) {
 	printk("[gecb] Error: cannot alloc crypto instance\n");
 	goto out_put_alg;

@@ -653,6 +653,53 @@ out:
 	return rc;
 }
 
+/*
+ * ecryptfs_decrypt_pages
+ *
+ * decrypt multiple pages at once
+ */
+int ecryptfs_decrypt_pages(struct page **pgs, unsigned int nr_pages)
+{
+    struct inode *ind;
+    struct ecryptfs_crypt_stat *cst;
+    struct scatterlist *sgs = NULL;
+    int rc = 0;
+    unsigned int i;
+
+    if (nr_pages == 0 || !pgs || !pgs[0]) {
+	goto out;
+    }
+
+    sgs = kmalloc(sizeof(struct scatterlist)*nr_pages, GFP_KERNEL);
+    if (!sgs) {
+	ecryptfs_printk(KERN_ERR "allocate sgs failed\n");
+	rc = -EFAULT;
+	goto out;
+    }
+    sg_init_table(sgs, nr_pages);
+
+    ind = pgs[0]->mapping->host;
+    cst = &(ecryptfs_inode_to_private(ind)->crypt_stat);
+    for (i=0; i<nr_pages; i++) {
+	rc = ecryptfs_read_lower_page_segment(pgs[i], pgs[i]->index, 0, PAGE_SIZE,
+					      ind);
+	if (rc < 0) {
+	    ecryptfs_printk(KERN_ERR "Error attempting to read lower page; rc "
+			    "= [%d] \n", rc);
+	    goto out;
+	}
+
+	sg_set_page(sgs, pgs[i], PAGE_SIZE, 0);
+    }
+
+    /* no IV for our implementation */
+    rc = decrypt_scatterlist(cst, sgs, sgs, nr_pages*PAGE_SIZE, NULL);
+out:
+    if (sgs)
+	kfree(sgs);
+    return rc;
+}
+
 /**
  * decrypt_scatterlist
  * @crypt_stat: Cryptographic context

@@ -13,14 +13,14 @@
 #define AES_GENERIC "ecb(aes-generic)"
 #define AES_ASM "ecb(aes-asm)"
 
-#define AES_GPU "gecb(aes-generic)"
+#define AES_GPU "gaes_ecb(aes-generic)"
 
 #define CIPHER AES_GPU
 
-#define MAX_BLK_SIZE (1*1024*1024)
-#define MIN_BLK_SIZE (1*1024)
+#define MAX_BLK_SIZE (32*1024)
+#define MIN_BLK_SIZE (4*1024)
 
-#define TEST_TIMES 10
+#define TEST_TIMES 100
 
 static void dump_page_content(u8 *p)
 {

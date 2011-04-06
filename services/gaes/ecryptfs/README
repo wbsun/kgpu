@@ -12,3 +12,6 @@ eCryptfs, where e means 'enterprise', large trunked reads/writes
 are expected to be very often and more frequent than small ones.
 
 The eCryptfs is an encrypted filesystem in Linux kernel.
+
+Weibin Sun, Xing Lin
+{wbsun, xinglin}@cs.utah.edu

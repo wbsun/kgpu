@@ -410,8 +410,9 @@ static int ecryptfs_encrypt_extent(struct page *enc_extent_page,
 
 	extent_base = (((loff_t)page->index)
 		       * (PAGE_CACHE_SIZE / crypt_stat->extent_size));
-	rc = ecryptfs_derive_iv(extent_iv, crypt_stat,
-				(extent_base + extent_offset));
+	rc = 0;
+	/* rc = ecryptfs_derive_iv(extent_iv, crypt_stat, */
+				/* (extent_base + extent_offset)); */
 	if (rc) {
 		ecryptfs_printk(KERN_ERR, "Error attempting to derive IV for "
 			"extent [0x%.16llx]; rc = [%d]\n",
@@ -536,8 +537,9 @@ static int ecryptfs_decrypt_extent(struct page *page,
 
 	extent_base = (((loff_t)page->index)
 		       * (PAGE_CACHE_SIZE / crypt_stat->extent_size));
-	rc = ecryptfs_derive_iv(extent_iv, crypt_stat,
-				(extent_base + extent_offset));
+	rc = 0;
+	/* rc = ecryptfs_derive_iv(extent_iv, crypt_stat, */
+				/* (extent_base + extent_offset)); */
 	if (rc) {
 		ecryptfs_printk(KERN_ERR, "Error attempting to derive IV for "
 			"extent [0x%.16llx]; rc = [%d]\n",
@@ -653,52 +655,6 @@ out:
 	return rc;
 }
 
-/*
- * ecryptfs_decrypt_pages
- *
- * decrypt multiple pages at once
- */
-int ecryptfs_decrypt_pages(struct page **pgs, unsigned int nr_pages)
-{
-    struct inode *ind;
-    struct ecryptfs_crypt_stat *cst;
-    struct scatterlist *sgs = NULL;
-    int rc = 0;
-    unsigned int i;
-
-    if (nr_pages == 0 || !pgs || !pgs[0]) {
-	goto out;
-    }
-
-    sgs = kmalloc(sizeof(struct scatterlist)*nr_pages, GFP_KERNEL);
-    if (!sgs) {
-	ecryptfs_printk(KERN_ERR "allocate sgs failed\n");
-	rc = -EFAULT;
-	goto out;
-    }
-    sg_init_table(sgs, nr_pages);
-
-    ind = pgs[0]->mapping->host;
-    cst = &(ecryptfs_inode_to_private(ind)->crypt_stat);
-    for (i=0; i<nr_pages; i++) {
-	rc = ecryptfs_read_lower_page_segment(pgs[i], pgs[i]->index, 0, PAGE_SIZE,
-					      ind);
-	if (rc < 0) {
-	    ecryptfs_printk(KERN_ERR "Error attempting to read lower page; rc "
-			    "= [%d] \n", rc);
-	    goto out;
-	}
-
-	sg_set_page(sgs, pgs[i], PAGE_SIZE, 0);
-    }
-
-    /* no IV for our implementation */
-    rc = decrypt_scatterlist(cst, sgs, sgs, nr_pages*PAGE_SIZE, NULL);
-out:
-    if (sgs)
-	kfree(sgs);
-    return rc;
-}
 
 /**
  * decrypt_scatterlist
@@ -744,6 +700,55 @@ static int decrypt_scatterlist(struct ecryptfs_crypt_stat *crypt_stat,
 	rc = size;
 out:
 	return rc;
+}
+
+
+/*
+ * ecryptfs_decrypt_pages
+ *
+ * decrypt multiple pages at once
+ */
+int ecryptfs_decrypt_pages(struct page **pgs, unsigned int nr_pages)
+{
+    struct inode *ind;
+    struct ecryptfs_crypt_stat *cst;
+    char iv[ECRYPTFS_MAX_IV_BYTES];
+    struct scatterlist *sgs = NULL;
+    int rc = 0;
+    unsigned int i;
+
+    if (nr_pages == 0 || !pgs || !pgs[0]) {
+	goto out;
+    }
+
+    sgs = kmalloc(sizeof(struct scatterlist)*nr_pages, GFP_KERNEL);
+    if (!sgs) {
+	printk(KERN_ERR "allocate sgs failed\n");
+	rc = -EFAULT;
+	goto out;
+    }
+    sg_init_table(sgs, nr_pages);
+
+    ind = pgs[0]->mapping->host;
+    cst = &(ecryptfs_inode_to_private(ind)->crypt_stat);
+    for (i=0; i<nr_pages; i++) {
+	rc = ecryptfs_read_lower_page_segment(pgs[i], pgs[i]->index, 0, PAGE_SIZE,
+					      ind);
+	if (rc < 0) {
+	    printk(KERN_ERR "Error attempting to read lower page; rc "
+			    "= [%d] \n", rc);
+	    goto out;
+	}
+
+	sg_set_page(sgs, pgs[i], PAGE_SIZE, 0);
+    }
+
+    /* no IV for our implementation */
+    rc = decrypt_scatterlist(cst, sgs, sgs, nr_pages*PAGE_SIZE, iv);
+out:
+    if (sgs)
+	kfree(sgs);
+    return rc;
 }
 
 /**
@@ -834,7 +839,7 @@ int ecryptfs_init_crypt_ctx(struct ecryptfs_crypt_stat *crypt_stat)
 	}
 	mutex_lock(&crypt_stat->cs_tfm_mutex);
 	rc = ecryptfs_crypto_api_algify_cipher_name(&full_alg_name,
-						    crypt_stat->cipher, "cbc");
+						    crypt_stat->cipher, "gaes_ecb");
 	if (rc)
 		goto out_unlock;
 	crypt_stat->tfm = crypto_alloc_blkcipher(full_alg_name, 0,

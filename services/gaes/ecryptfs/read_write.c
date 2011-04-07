@@ -18,6 +18,12 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
  * 02111-1307, USA.
+ * 
+ * See the GPL-COPYING file in the top-level directory.
+ *
+ * Copyright (c) 2010-2011 University of Utah and the Flux Group.
+ * All rights reserved.
+ * 
  */
 
 #include <linux/fs.h>

@@ -1,16 +1,12 @@
 /*
- * TODO:
- *     - In get_next_service_request, read directly, no need of poll because:
- *         when a service is done, the service_done function will check if
- *         the global all_reqs list will be empty, if YES: do fcntl to set
- *         the devfd to be blocking, otherwise keep non-blocking.
- *         AND in get_next_service_request, when a request is comming, check
- *         if the global all_reqs list was empty previously, if YES: do
- *         fcntl to set devfd to be non-blocking, otherwise no change.
+ * This work is licensed under the terms of the GNU GPL, version 2.  See
+ * the GPL-COPYING file in the top-level directory.
  *
- *     - Cleanup all headers and sources for well-organized code/defs...
+ * Copyright (c) 2010-2011 University of Utah and the Flux Group.
+ * All rights reserved.
  *
  */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>

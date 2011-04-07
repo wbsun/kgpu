@@ -14,7 +14,7 @@ KGPU is not an OS running on GPU, which is almost impossible because of the limi
 *To access the code, using git to clone: git@github.com:wbsun/kgpu.git or goto https://github.com/wbsun/kgpu .*
 
 
-As for copyright, we use GPLv2.
+As for copyright license, we use GPLv2.
 
 
 Weibin Sun, Xing Lin

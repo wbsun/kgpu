@@ -677,6 +677,8 @@ static int decrypt_scatterlist(struct ecryptfs_crypt_stat *crypt_stat,
 		.flags = CRYPTO_TFM_REQ_MAY_SLEEP
 	};
 	int rc = 0;
+	
+	/*printk("[g-ecryptfs] Info: in dec_scatterlist dec %d pages\n", size/PAGE_SIZE);*/
 
 	/* Consider doing this once, when the file is opened */
 	mutex_lock(&crypt_stat->cs_tfm_mutex);
@@ -740,7 +742,7 @@ int ecryptfs_decrypt_pages(struct page **pgs, unsigned int nr_pages)
 	    goto out;
 	}
 
-	sg_set_page(sgs, pgs[i], PAGE_SIZE, 0);
+	sg_set_page(sgs+i, pgs[i], PAGE_SIZE, 0);
     }
 
     /* no IV for our implementation */

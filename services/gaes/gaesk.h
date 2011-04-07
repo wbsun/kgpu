@@ -5,6 +5,8 @@
 #ifndef __GAESK_H__
 #define __GAESK_H__
 
+#define GAES_ECB_SIZE_THRESHOLD (2*PAGE_SIZE)
+
 static void cvt_endian_u32(u32* buf, int n)
 {
   u8* b = (u8*)buf;

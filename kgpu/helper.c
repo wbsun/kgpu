@@ -191,9 +191,9 @@ int get_next_service_request()
 	    }
 	} else {
 	
-	    dbg("request %d %s %p %p %d\n", sreq->sr.kureq.id, sreq->sr.kureq.sname,
-		sreq->sr.kureq.input, sreq->sr.kureq.output, *(int*)(sreq->sr.kureq.input));
-	
+	    /*dbg("request %d %s %p %p %d\n", sreq->sr.kureq.id, sreq->sr.kureq.sname,
+		sreq->sr.kureq.input, sreq->sr.kureq.output, (int)(sreq->sr.kureq.insize));
+	    */
 	    list_add_tail(&sreq->glist, &all_reqs);
 	    sreq->sr.stream_id = -1;
 	

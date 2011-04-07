@@ -254,7 +254,7 @@ static int ecryptfs_readpages(struct file *filp, struct address_space *mapping,
 {
     struct ecryptfs_crypt_stat *crypt_stat =
 	&ecryptfs_inode_to_private(mapping->host)->crypt_stat;
-    struct page **pgs;
+    struct page **pgs = NULL;
     unsigned int page_idx;
     int rc = 0;
     int nodec = 0;
@@ -272,6 +272,8 @@ static int ecryptfs_readpages(struct file *filp, struct address_space *mapping,
 	    return -EFAULT;
 	}
     }
+    
+    /*printk("[g-ecryptfs] Info: in read_pages read %d pages\n", nr_pages);*/
 
     for (page_idx = 0; page_idx < nr_pages; page_idx++) {
 	struct page *page = list_entry(pages->prev, struct page, lru);
@@ -295,7 +297,13 @@ static int ecryptfs_readpages(struct file *filp, struct address_space *mapping,
 	rc = ecryptfs_decrypt_pages(pgs, nr_pages);
 
 	for (page_idx = 0; page_idx < nr_pages; page_idx++) {
-	    page_cache_release(pgs[page_idx]);
+		if (rc)
+			ClearPageUptodate(pgs[page_idx]);
+		else
+			SetPageUptodate(pgs[page_idx]);
+		unlock_page(pgs[page_idx]);
+		
+	    page_cache_release(pgs[page_idx]); 
 	}
 
 	kfree(pgs);

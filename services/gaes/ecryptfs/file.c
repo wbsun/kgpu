@@ -337,6 +337,13 @@ const struct file_operations ecryptfs_dir_fops = {
 	.llseek = default_llseek,
 };
 
+static ssize_t eread(struct file *f, char __user *b, size_t l, loff_t *p)
+{
+    printk("ecryptfs %s Read: %lu at %lu\n", current->comm, (unsigned long)l,
+	   (unsigned long)(p?*p:0));
+    return do_sync_read(f, b, l, p);
+}
+
 const struct file_operations ecryptfs_main_fops = {
 	.llseek = generic_file_llseek,
 	.read = do_sync_read,

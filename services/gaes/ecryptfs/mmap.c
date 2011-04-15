@@ -40,6 +40,8 @@
 #include <linux/crypto.h>
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
+#include <linux/log2.h>
+#include <linux/pagemap.h>
 #include <asm/unaligned.h>
 #include "ecryptfs_kernel.h"
 
@@ -80,6 +82,14 @@ static int ecryptfs_writepage(struct page *page, struct writeback_control *wbc)
 	unlock_page(page);
 out:
 	return rc;
+}
+
+static int ecryptfs_writepages(struct address_space *mapping,
+			       struct writeback_control *wbc)
+{
+    int ret;
+
+    return ret;
 }
 
 static void strip_xattr_flag(char *page_virt,
@@ -200,6 +210,9 @@ static int ecryptfs_readpage(struct file *file, struct page *page)
 		&ecryptfs_inode_to_private(page->mapping->host)->crypt_stat;
 	int rc = 0;
 
+	/* printk("ecryptfs: read page %lu\n", (unsigned long)(page->index)); */
+	/* dump_stack(); */
+
 	if (!crypt_stat
 	    || !(crypt_stat->flags & ECRYPTFS_ENCRYPTED)
 	    || (crypt_stat->flags & ECRYPTFS_NEW_FILE)) {
@@ -233,6 +246,7 @@ static int ecryptfs_readpage(struct file *file, struct page *page)
 		}
 	} else {
 		rc = ecryptfs_decrypt_page(page);
+		
 		if (rc) {
 			ecryptfs_printk(KERN_ERR, "Error decrypting page; "
 					"rc = [%d]\n", rc);
@@ -259,66 +273,69 @@ out:
 static int ecryptfs_readpages(struct file *filp, struct address_space *mapping,
 			      struct list_head *pages, unsigned nr_pages)
 {
-    struct ecryptfs_crypt_stat *crypt_stat =
-	&ecryptfs_inode_to_private(mapping->host)->crypt_stat;
-    struct page **pgs = NULL;
-    unsigned int page_idx;
-    int rc = 0;
-    int nodec = 0;
+        struct ecryptfs_crypt_stat *crypt_stat =
+	    &ecryptfs_inode_to_private(mapping->host)->crypt_stat;
+	struct page **pgs = NULL;
+	unsigned int page_idx = 0;
+	int rc = 0;
+	int nodec = 0;
+	u32 sz = 0; 
 
-    if (!crypt_stat
-	|| !(crypt_stat->flags & ECRYPTFS_ENCRYPTED)
-	|| (crypt_stat->flags & ECRYPTFS_NEW_FILE)
-	|| (crypt_stat->flags & ECRYPTFS_VIEW_AS_ENCRYPTED)) {
-	nodec = 1;
-    }
-
-    if (!nodec) {
-	pgs = kmalloc(sizeof(struct page*)*nr_pages, GFP_KERNEL);
-	if (!pgs) {
-	    return -EFAULT;
-	}
-    }
-    
-    /*printk("[g-ecryptfs] Info: in read_pages read %d pages\n", nr_pages);*/
-
-    for (page_idx = 0; page_idx < nr_pages; page_idx++) {
-	struct page *page = list_entry(pages->prev, struct page, lru);
-	list_del(&page->lru);
-	if (add_to_page_cache_lru(page, mapping,
-				   page->index, GFP_KERNEL)) {
-	    printk("[g-eCryptfs] INFO: cannot add page %lu to cache lru\n",
-		   page->index);
-	} else {
-	    if (nodec)
-		rc |= ecryptfs_readpage(filp, page);
+	if (!crypt_stat
+	    || !(crypt_stat->flags & ECRYPTFS_ENCRYPTED)
+	    || (crypt_stat->flags & ECRYPTFS_NEW_FILE)
+	    || (crypt_stat->flags & ECRYPTFS_VIEW_AS_ENCRYPTED)) {
+	    nodec = 1;
 	}
 
-	if (nodec)
-	    page_cache_release(page);
-	else
-	    pgs[page_idx] = page;	
-    }
+	if (!nodec) {
+	    sz = __ilog2_u32((u32)__roundup_pow_of_two(nr_pages*sizeof(struct page*)));
+	    pgs = (struct page **)__get_free_pages(GFP_KERNEL, sz);
+	    if (!pgs) {
+		return -EFAULT;
+	    }
+	}
 
-    if (!nodec) {
-	rc = ecryptfs_decrypt_pages(pgs, nr_pages);
+	/* printk("[g-ecryptfs] Info: in read_pages read %d pages %d: \n", nr_pages, nodec); */
+	/* dump_stack(); */
 
 	for (page_idx = 0; page_idx < nr_pages; page_idx++) {
-		if (rc)
-			ClearPageUptodate(pgs[page_idx]);
-		else
-			SetPageUptodate(pgs[page_idx]);
-		unlock_page(pgs[page_idx]);
-		
-	    page_cache_release(pgs[page_idx]); 
+	    struct page *page = list_entry(pages->prev, struct page, lru);
+	    list_del(&page->lru);
+	    if (add_to_page_cache_lru(page, mapping,
+				      page->index, GFP_KERNEL)) {
+		printk("[g-eCryptfs] INFO: cannot add page %lu to cache lru\n",
+		       (unsigned long)(page->index));
+	    } else {
+		if (nodec)
+		    rc |= ecryptfs_readpage(filp, page);
+	    }
+
+	    if (nodec)
+		page_cache_release(page);
+	    else
+		pgs[page_idx] = page;
 	}
 
-	kfree(pgs);
-    }
+	if (!nodec) {
+	    rc = ecryptfs_decrypt_pages(pgs, nr_pages);
 
-    return rc;
+	    for (page_idx = 0; page_idx < nr_pages; page_idx++) {
+		
+		if (rc)
+		    ClearPageUptodate(pgs[page_idx]);
+		else
+		    SetPageUptodate(pgs[page_idx]);
+		unlock_page(pgs[page_idx]);
+
+		page_cache_release(pgs[page_idx]);
+	    }
+
+	    free_pages((unsigned long)pgs, sz);
+	}
+
+	return 0;
 }
-
 
 /**
  * Called with lower inode mutex held.
@@ -633,5 +650,6 @@ const struct address_space_operations ecryptfs_aops = {
 	.readpages = ecryptfs_readpages,
 	.write_begin = ecryptfs_write_begin,
 	.write_end = ecryptfs_write_end,
+	/* .writepages = ecryptfs_writepages, */
 	.bmap = ecryptfs_bmap,
 };

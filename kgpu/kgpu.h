@@ -17,8 +17,8 @@ struct gpu_buffer {
     /* unsigned long size; */
 };
 
-#define KGPU_BUF_NR 128
-#define KGPU_BUF_SIZE (4*1024*1024)
+#define KGPU_BUF_NR 32
+#define KGPU_BUF_SIZE (16*1024*1024)
 
 #define KGPU_DEV_NAME "kgpu"
 

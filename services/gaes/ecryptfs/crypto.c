@@ -39,6 +39,7 @@
 #include <linux/namei.h>
 #include <linux/crypto.h>
 #include <linux/file.h>
+#include <linux/log2.h>
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
 #include <asm/unaligned.h>
@@ -684,9 +685,7 @@ static int decrypt_scatterlist(struct ecryptfs_crypt_stat *crypt_stat,
 		.flags = CRYPTO_TFM_REQ_MAY_SLEEP
 	};
 	int rc = 0;
-	
-	/*printk("[g-ecryptfs] Info: in dec_scatterlist dec %d pages\n", size/PAGE_SIZE);*/
-
+      
 	/* Consider doing this once, when the file is opened */
 	mutex_lock(&crypt_stat->cs_tfm_mutex);
 	rc = crypto_blkcipher_setkey(crypt_stat->tfm, crypt_stat->key,
@@ -724,13 +723,18 @@ int ecryptfs_decrypt_pages(struct page **pgs, unsigned int nr_pages)
     char iv[ECRYPTFS_MAX_IV_BYTES];
     struct scatterlist *sgs = NULL;
     int rc = 0;
-    unsigned int i;
+    unsigned int i=0;
+    u32 sz = 0;
 
     if (nr_pages == 0 || !pgs || !pgs[0]) {
 	goto out;
     }
 
-    sgs = kmalloc(sizeof(struct scatterlist)*nr_pages, GFP_KERNEL);
+    sz = __ilog2_u32((u32)__roundup_pow_of_two(nr_pages*sizeof(struct scatterlist)));
+
+    /* printk("[g-ecryptfs] decrypt pages %u\n", nr_pages); */
+
+    sgs = (struct scatterlist *)__get_free_pages(GFP_KERNEL, sz);
     if (!sgs) {
 	printk(KERN_ERR "allocate sgs failed\n");
 	rc = -EFAULT;
@@ -756,8 +760,8 @@ int ecryptfs_decrypt_pages(struct page **pgs, unsigned int nr_pages)
     rc = decrypt_scatterlist(cst, sgs, sgs, nr_pages*PAGE_SIZE, iv);
 out:
     if (sgs)
-	kfree(sgs);
-    return rc;
+	free_pages((unsigned long)sgs, sz);
+    return (rc >= 0?0:rc);
 }
 
 /**

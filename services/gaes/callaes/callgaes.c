@@ -26,10 +26,10 @@
 
 #define CIPHER AES_GPU
 
-#define MAX_BLK_SIZE (32*1024)
+#define MAX_BLK_SIZE (1024*1024)
 #define MIN_BLK_SIZE (4*1024)
 
-#define TEST_TIMES 100
+#define TEST_TIMES 1
 
 static void dump_page_content(u8 *p)
 {
@@ -124,7 +124,7 @@ void test_aes(void)
 		sg_set_buf(dst+i, buf, PAGE_SIZE);
 	}
 	
-	for (bs = MIN_BLK_SIZE; bs <= MAX_BLK_SIZE; bs*=2) {
+	for (bs = MAX_BLK_SIZE; bs >= MIN_BLK_SIZE; bs>>=1) {
 		struct timeval t0, t1;
 		long int enc, dec;
 

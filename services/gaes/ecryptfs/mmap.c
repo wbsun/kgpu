@@ -289,8 +289,9 @@ static int ecryptfs_readpages(struct file *filp, struct address_space *mapping,
 	}
 
 	if (!nodec) {
-	    sz = __ilog2_u32((u32)__roundup_pow_of_two(nr_pages*sizeof(struct page*)));
-	    pgs = (struct page **)__get_free_pages(GFP_KERNEL, sz);
+	    /* sz = __ilog2_u32((u32)__roundup_pow_of_two(nr_pages*sizeof(struct page*))); */
+	    /* pgs = (struct page **)__get_free_pages(GFP_KERNEL, sz); */
+	    pgs = (struct page **)kmalloc(nr_pages*sizeof(struct page*), GFP_KERNEL);
 	    if (!pgs) {
 		return -EFAULT;
 	    }
@@ -331,7 +332,8 @@ static int ecryptfs_readpages(struct file *filp, struct address_space *mapping,
 		page_cache_release(pgs[page_idx]);
 	    }
 
-	    free_pages((unsigned long)pgs, sz);
+	    kfree(pgs);
+	    /* free_pages((unsigned long)pgs, sz); */
 	}
 
 	return 0;

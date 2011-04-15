@@ -730,11 +730,13 @@ int ecryptfs_decrypt_pages(struct page **pgs, unsigned int nr_pages)
 	goto out;
     }
 
-    sz = __ilog2_u32((u32)__roundup_pow_of_two(nr_pages*sizeof(struct scatterlist)));
+    /* sz = __ilog2_u32((u32)__roundup_pow_of_two(nr_pages*sizeof(struct scatterlist))); */
 
     /* printk("[g-ecryptfs] decrypt pages %u\n", nr_pages); */
 
-    sgs = (struct scatterlist *)__get_free_pages(GFP_KERNEL, sz);
+    sgs = (struct scatterlist *)kmalloc(nr_pages*sizeof(struct scatterlist), GFP_KERNEL);
+    /* __get_free_pages(GFP_KERNEL, sz); */
+
     if (!sgs) {
 	printk(KERN_ERR "allocate sgs failed\n");
 	rc = -EFAULT;
@@ -760,7 +762,8 @@ int ecryptfs_decrypt_pages(struct page **pgs, unsigned int nr_pages)
     rc = decrypt_scatterlist(cst, sgs, sgs, nr_pages*PAGE_SIZE, iv);
 out:
     if (sgs)
-	free_pages((unsigned long)sgs, sz);
+	kfree(sgs);
+	/* free_pages((unsigned long)sgs, sz); */
     return (rc >= 0?0:rc);
 }
 

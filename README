@@ -3,15 +3,24 @@ KGPU - Augmenting Linux with GPUs
 
 What is it?
 
-Treating the GPU as a computing co-processor. To enable the data-parallel computation inside the Linux kernel. Using SIMD (or SIMT in CUDA) style code to accelerate Linux kernel functionality.
+Treating the GPU as a computing co-processor. To enable the data-parallel 
+computation inside the Linux kernel. Using SIMD (or SIMT in CUDA) style code to
+ accelerate Linux kernel functionality.
 
-Make the Linux kernel really parallelized: which is not only processing multiple requests concurrently, but can also partition a single large requested computation into tiles and do them on GPU cores.
+Make the Linux kernel really parallelized: which is not only processing 
+multiple requests concurrently, but can also partition a single large 
+requested computation into tiles and do them on GPU cores.
 
-GPU can give the OS kernel dedicated cores that can be fully occupied by the kernel. But the multicore CPUs should not be occupied by the kernel because other tasks also need them.
+GPU can give the OS kernel dedicated cores that can be fully occupied by the 
+kernel. But the multicore CPUs should not be occupied by the kernel because 
+other tasks also need them.
 
-KGPU is not an OS running on GPU, which is almost impossible because of the limited functionality of current GPUs. KGPU tries to enable vector computing for the kernel.
+KGPU is not an OS running on GPU, which is almost impossible because of the 
+limited functionality of current GPU architectures. KGPU tries to enable 
+vector computing for the kernel.
 
-*To access the code, using git to clone: git@github.com:wbsun/kgpu.git or goto https://github.com/wbsun/kgpu .*
+*To access the code, using git to clone: git@github.com:wbsun/kgpu.git 
+or goto https://github.com/wbsun/kgpu .*
 
 
 As for copyright license, we use GPLv2.

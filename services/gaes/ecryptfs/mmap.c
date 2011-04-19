@@ -23,13 +23,13 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
  * 02111-1307, USA.
- * 
- * 
+ *
+ *
  * See the GPL-COPYING file in the top-level directory.
  *
  * Copyright (c) 2010-2011 University of Utah and the Flux Group.
  * All rights reserved.
- * 
+ *
  */
 
 #include <linux/pagemap.h>
@@ -42,7 +42,9 @@
 #include <linux/slab.h>
 #include <linux/log2.h>
 #include <linux/pagemap.h>
+#include <linux/pagevec.h>
 #include <asm/unaligned.h>
+#include <trace/events/writeback.h>
 #include "ecryptfs_kernel.h"
 
 /**
@@ -71,6 +73,7 @@ static int ecryptfs_writepage(struct page *page, struct writeback_control *wbc)
 {
 	int rc;
 
+	printk("[g-ecryptfs] Info: write single page\n");
 	rc = ecryptfs_encrypt_page(page);
 	if (rc) {
 		ecryptfs_printk(KERN_WARNING, "Error encrypting "
@@ -84,12 +87,184 @@ out:
 	return rc;
 }
 
+/*
+ * Inspired by write_cache_pages from /mm/page-writeback.c
+ */
 static int ecryptfs_writepages(struct address_space *mapping,
 			       struct writeback_control *wbc)
 {
-    int ret;
+	int ret = 0;
+	int done = 0;
+	struct pagevec pvec;
+	int nr_pages;
+	pgoff_t uninitialized_var(writeback_index);
+	pgoff_t index;
+	pgoff_t end;		/* Inclusive */
+	pgoff_t done_index;
+	int cycled;
+	int range_whole = 0;
+	int tag;
+	struct page **pgs;
+	int pgidx;
+	
+	printk("[g-ecryptfs] Info: call writepages\n");
 
-    return ret;
+	pgs = kmalloc(sizeof(struct page*)*PAGEVEC_SIZE, GFP_KERNEL);
+	if (!pgs) {
+		printk("[g-ecryptfs] Error: pgs alloc failed!\n");
+		return -EFAULT;
+	}
+
+	pagevec_init(&pvec, 0);
+	if (wbc->range_cyclic) {
+		writeback_index = mapping->writeback_index; /* prev offset */
+		index = writeback_index;
+		if (index == 0)
+			cycled = 1;
+		else
+			cycled = 0;
+		end = -1;
+	} else {
+		index = wbc->range_start >> PAGE_CACHE_SHIFT;
+		end = wbc->range_end >> PAGE_CACHE_SHIFT;
+		if (wbc->range_start == 0 && wbc->range_end == LLONG_MAX)
+			range_whole = 1;
+		cycled = 1; /* ignore range_cyclic tests */
+	}
+	if (wbc->sync_mode == WB_SYNC_ALL)
+		tag = PAGECACHE_TAG_TOWRITE;
+	else
+		tag = PAGECACHE_TAG_DIRTY;
+retry:
+	if (wbc->sync_mode == WB_SYNC_ALL)
+		tag_pages_for_writeback(mapping, index, end);
+	done_index = index;
+	while (!done && (index <= end)) {
+		int i;
+		struct page *page;
+
+		nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, tag,
+			      min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1);
+		if (nr_pages == 0)
+			break;
+		pgidx = 0;
+
+		for (i = 0; i < nr_pages; i++) {
+			page = pvec.pages[i];
+
+			/*
+			 * At this point, the page may be truncated or
+			 * invalidated (changing page->mapping to NULL), or
+			 * even swizzled back from swapper_space to tmpfs file
+			 * mapping. However, page->index will not change
+			 * because we have a reference on the page.
+			 */
+			if (page->index > end) {
+				/*
+				 * can't be range_cyclic (1st pass) because
+				 * end == -1 in that case.
+				 */
+				done = 1;
+				break;
+			}
+
+			done_index = page->index + 1;
+
+			lock_page(page);
+
+			/*
+			 * Page truncated or invalidated. We can freely skip it
+			 * then, even for data integrity operations: the page
+			 * has disappeared concurrently, so there could be no
+			 * real expectation of this data interity operation
+			 * even if there is now a new, dirty page at the same
+			 * pagecache address.
+			 */
+			if (unlikely(page->mapping != mapping)) {
+continue_unlock:
+				unlock_page(page);
+				continue;
+			}
+
+			if (!PageDirty(page)) {
+				/* someone wrote it for us */
+				goto continue_unlock;
+			}
+
+			if (PageWriteback(page)) {
+				if (wbc->sync_mode != WB_SYNC_NONE)
+					wait_on_page_writeback(page);
+				else
+					goto continue_unlock;
+			}
+
+			BUG_ON(PageWriteback(page));
+			if (!clear_page_dirty_for_io(page))
+				goto continue_unlock;
+
+			pgs[pgidx++] = page;
+		}
+
+		/*trace_wbc_writepage(wbc, mapping->backing_dev_info);*/
+		ret = ecryptfs_encrypt_pages(pgs, pgidx);
+		printk("[g-ecryptfs] Info: enc %d pages in writepages\n", pgidx);
+		mapping_set_error(mapping, ret);
+
+		for (i = 0; i < nr_pages; i++) {
+			page = pvec.pages[i];
+
+			if (unlikely(ret)) {
+				if (ret == AOP_WRITEPAGE_ACTIVATE) {
+					if (PageLocked(page))
+						unlock_page(page);
+					ret = 0;
+				} else {
+					/*
+					 * done_index is set past this page,
+					 * so media errors will not choke
+					 * background writeout for the entire
+					 * file. This has consequences for
+					 * range_cyclic semantics (ie. it may
+					 * not be suitable for data integrity
+					 * writeout).
+					 */
+					done = 1;
+					break;
+				}
+			}
+
+			/*
+			 * We stop writing back only if we are not doing
+			 * integrity sync. In case of integrity sync we have to
+			 * keep going until we have written all the pages
+			 * we tagged for writeback prior to entering this loop.
+			 */
+			if (--wbc->nr_to_write <= 0 &&
+			    wbc->sync_mode == WB_SYNC_NONE) {
+				done = 1;
+				break;
+			}
+		}
+		pagevec_release(&pvec);
+		cond_resched();
+	}
+	if (!cycled && !done) {
+		/*
+		 * range_cyclic:
+		 * We hit the last page and there is more work to be done: wrap
+		 * back to the start of the file
+		 */
+		cycled = 1;
+		index = 0;
+		end = writeback_index - 1;
+		goto retry;
+	}
+	if (wbc->range_cyclic || (range_whole && wbc->nr_to_write > 0))
+		mapping->writeback_index = done_index;
+
+	kfree(pgs);
+
+	return ret;
 }
 
 static void strip_xattr_flag(char *page_virt,
@@ -246,7 +421,7 @@ static int ecryptfs_readpage(struct file *file, struct page *page)
 		}
 	} else {
 		rc = ecryptfs_decrypt_page(page);
-		
+
 		if (rc) {
 			ecryptfs_printk(KERN_ERR, "Error decrypting page; "
 					"rc = [%d]\n", rc);
@@ -279,7 +454,7 @@ static int ecryptfs_readpages(struct file *filp, struct address_space *mapping,
 	unsigned int page_idx = 0;
 	int rc = 0;
 	int nodec = 0;
-	u32 sz = 0; 
+	/* u32 sz = 0; */
 
 	if (!crypt_stat
 	    || !(crypt_stat->flags & ECRYPTFS_ENCRYPTED)
@@ -322,7 +497,7 @@ static int ecryptfs_readpages(struct file *filp, struct address_space *mapping,
 	    rc = ecryptfs_decrypt_pages(pgs, nr_pages);
 
 	    for (page_idx = 0; page_idx < nr_pages; page_idx++) {
-		
+
 		if (rc)
 		    ClearPageUptodate(pgs[page_idx]);
 		else
@@ -385,6 +560,8 @@ static int ecryptfs_write_begin(struct file *file,
 	if (!page)
 		return -ENOMEM;
 	*pagep = page;
+
+	printk("[g-ecryptfs] Info: write begin %lu, %u\n", (unsigned long)pos, len);
 
 	prev_page_end_size = ((loff_t)index << PAGE_CACHE_SHIFT);
 	if (!PageUptodate(page)) {
@@ -579,9 +756,12 @@ static int ecryptfs_write_end(struct file *file,
 	unsigned from = pos & (PAGE_CACHE_SIZE - 1);
 	unsigned to = from + copied;
 	struct inode *ecryptfs_inode = mapping->host;
+	//struct ecryptfs_inode_info *iinfo = ecryptfs_inode_to_private(ecryptfs_inode);
 	struct ecryptfs_crypt_stat *crypt_stat =
 		&ecryptfs_inode_to_private(ecryptfs_inode)->crypt_stat;
 	int rc;
+
+	printk("[g-ecryptfs] Info: write end %lu, %u\n", (unsigned long)pos, len);
 
 	if (crypt_stat->flags & ECRYPTFS_NEW_FILE) {
 		ecryptfs_printk(KERN_DEBUG, "ECRYPTFS_NEW_FILE flag set in "
@@ -608,12 +788,34 @@ static int ecryptfs_write_end(struct file *file,
 			"zeros in page with index = [0x%.16lx]\n", index);
 		goto out;
 	}
+	/*if (iinfo->nrpages>0) {
+		if (!iinfo->pgs) {
+			iinfo->pgs = kmalloc(sizeof(struct page*)*iinfo->nrpages, GFP_KERNEL);
+			if (!iinfo->pgs) {
+				printk("[g-ecryptfs] Error: allocate memory failed\n");
+				goto page_by_page;
+			}
+			iinfo->cur_page = 0;
+		}
+		iinfo->pgs[iinfo->cur_page++] = page;		
+		if (iinfo->cur_page == iinfo->nrpages) {
+			rc = ecryptfs_encrypt_pages(iinfo->pgs, iinfo->nrpages);
+			kfree(iinfo->pgs);
+			iinfo->pgs = NULL;
+			iinfo->nrpages = 0;
+			iinfo->cur_page = 0;
+		}
+		goto done;
+	}	*/
+	
+
 	rc = ecryptfs_encrypt_page(page);
 	if (rc) {
 		ecryptfs_printk(KERN_WARNING, "Error encrypting page (upper "
 				"index [0x%.16lx])\n", index);
 		goto out;
 	}
+
 	if (pos + copied > i_size_read(ecryptfs_inode)) {
 		i_size_write(ecryptfs_inode, pos + copied);
 		ecryptfs_printk(KERN_DEBUG, "Expanded file size to "
@@ -652,6 +854,6 @@ const struct address_space_operations ecryptfs_aops = {
 	.readpages = ecryptfs_readpages,
 	.write_begin = ecryptfs_write_begin,
 	.write_end = ecryptfs_write_end,
-	/* .writepages = ecryptfs_writepages, */
+	.writepages = ecryptfs_writepages,
 	.bmap = ecryptfs_bmap,
 };

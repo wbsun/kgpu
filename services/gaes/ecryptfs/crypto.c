@@ -45,6 +45,8 @@
 #include <asm/unaligned.h>
 #include "ecryptfs_kernel.h"
 
+static char fake_iv[ECRYPTFS_MAX_IV_BYTES];
+
 static int
 ecryptfs_decrypt_page_offset(struct ecryptfs_crypt_stat *crypt_stat,
 			     struct page *dst_page, int dst_offset,
@@ -462,6 +464,160 @@ out:
 	return rc;
 }
 
+int ecryptfs_encrypt_pages(struct page **pgs, unsigned int nr_pages)
+{
+	struct ecryptfs_crypt_stat *cst;
+	struct inode *ind;
+	struct scatterlist *sgs = NULL, *sgd = NULL;
+	int rc = 0;
+	unsigned int i=0;
+	u32 sz = 0;
+	struct page *p=NULL;
+
+	if (!nr_pages || !pgs || !pgs[0]) {
+		goto out;
+	}
+
+	sgs = (struct scatterlist *)kmalloc(
+		nr_pages*sizeof(struct scatterlist), GFP_KERNEL);
+	if (!sgs) {
+		printk(KERN_ERR "allocate sgs failed\n");
+		rc = -ENOMEM;
+		goto out;
+    	}
+    	
+    	sgd = (struct scatterlist *)kmalloc(
+		nr_pages*sizeof(struct scatterlist), GFP_KERNEL);
+	if (!sgd) {
+		printk(KERN_ERR "allocate sgr failed\n");
+		rc = -ENOMEM;
+		kfree(sgs);
+		goto out;
+    	}
+    	
+    	sg_init_table(sgs, nr_pages);
+    	sg_init_table(sgd, nr_pages);
+
+	ind = pgs[0]->mapping->host;
+	cst = &(ecryptfs_inode_to_private(ind)->crypt_stat);
+	
+	for (i = 0; i<nr_pages; i++) {
+		p = alloc_page(GFP_USER);
+		if (!p) {
+			rc = -ENOMEM;
+			printk("[g-ecryptfs] Error: cannot allocate page\n");
+			for (sz = 0; sz < i; sz++) {
+				p = sg_page(sgd+sz);
+				__free_page(p);
+			}
+			goto higher_out;
+		}
+			
+		sg_set_page(sgs+i, pgs[i], PAGE_SIZE, 0);
+		sg_set_page(sgd+i, p, PAGE_SIZE, 0);
+	}
+	
+	rc = encrypt_scatterlist(cst, sgd, sgs, PAGE_SIZE*nr_pages, fake_iv);
+	rc = 0;
+	
+	for (i=0; i<nr_pages; i++) {
+		int ret;
+		p = sg_page(sgd+i);
+		
+		ret = ecryptfs_write_lower_page_segment(ind, p, 0, PAGE_SIZE);
+		
+		__free_page(p);		
+		if (ret<0) {
+			ecryptfs_printk(KERN_ERR, "Error attempting "
+					"to write lower page; rc = [%d]"
+					"\n", ret);
+			ClearPageUptodate(sg_page(sgs+i));	
+			rc = ret;		
+		} else {
+			p = sg_page(sgs+i);	
+			SetPageUptodate(p);
+			if(PageLocked(p))
+				unlock_page(p);			
+		}		
+	}
+	
+higher_out:
+	kfree(sgs);
+	kfree(sgd);
+out:
+	return rc;
+}
+
+int ecryptfs_encrypt_pages2(struct page **pgs, unsigned int nr_pages)
+{
+	struct ecryptfs_crypt_stat *cst;
+	struct inode *ind;
+	struct scatterlist *sgs = NULL, *sgd = NULL;
+	int rc = 0;
+	unsigned int i=0;
+	u32 sz = 0;
+	struct page *p=NULL;
+
+	if (!nr_pages || !pgs || !pgs[0]) {
+		goto out;
+	}
+
+	sgs = (struct scatterlist *)kmalloc(
+		nr_pages*sizeof(struct scatterlist), GFP_KERNEL);
+	if (!sgs) {
+		printk(KERN_ERR "allocate sgs failed\n");
+		rc = -ENOMEM;
+		goto out;
+    	}
+    	
+    	sgd = (struct scatterlist *)kmalloc(
+		nr_pages*sizeof(struct scatterlist), GFP_KERNEL);
+	if (!sgd) {
+		printk(KERN_ERR "allocate sgr failed\n");
+		rc = -ENOMEM;
+		kfree(sgs);
+		goto out;
+    	}
+    	
+    	sg_init_table(sgs, nr_pages);
+    	sg_init_table(sgd, nr_pages);
+
+	ind = pgs[0]->mapping->host;
+	cst = &(ecryptfs_inode_to_private(ind)->crypt_stat);
+	
+	for (i = 0; i<nr_pages; i++) {
+		p = alloc_page(GFP_USER);
+		if (!p) {
+			rc = -ENOMEM;
+			printk("[g-ecryptfs] Error: cannot allocate page\n");
+			for (sz = 0; sz < i; sz++) {
+				p = sg_page(sgd+sz);
+				__free_page(p);
+			}
+			goto higher_out;
+		}
+			
+		sg_set_page(sgs+i, pgs[i], PAGE_SIZE, 0);
+		sg_set_page(sgd+i, p, PAGE_SIZE, 0);
+	}
+	
+	rc = encrypt_scatterlist(cst, sgd, sgs, PAGE_SIZE*nr_pages, fake_iv);
+	rc = 0;
+	
+	for (i=0; i<nr_pages; i++) {
+		p = sg_page(sgd+i);		
+		ecryptfs_write_lower_page_segment(ind, p, 0, PAGE_SIZE);	
+		__free_page(p);			
+	}
+	
+higher_out:
+	kfree(sgs);
+	kfree(sgd);
+out:
+	return rc;
+}
+
+
 /**
  * ecryptfs_encrypt_page
  * @page: Page mapped from the eCryptfs inode for the file; contains
@@ -724,9 +880,9 @@ int ecryptfs_decrypt_pages(struct page **pgs, unsigned int nr_pages)
     struct scatterlist *sgs = NULL;
     int rc = 0;
     unsigned int i=0;
-    u32 sz = 0;
+    /* u32 sz = 0; */
 
-    if (nr_pages == 0 || !pgs || !pgs[0]) {
+    if (!nr_pages || !pgs || !pgs[0]) {
 	goto out;
     }
 
@@ -747,13 +903,19 @@ int ecryptfs_decrypt_pages(struct page **pgs, unsigned int nr_pages)
     ind = pgs[0]->mapping->host;
     cst = &(ecryptfs_inode_to_private(ind)->crypt_stat);
     for (i=0; i<nr_pages; i++) {
-	rc = ecryptfs_read_lower_page_segment(pgs[i], pgs[i]->index, 0, PAGE_SIZE,
-					      ind);
+    	char *virt;
+    	loff_t offset;
+    	offset = ecryptfs_lower_header_size(cst)
+    		+ ((loff_t)(pgs[i]->index)<<PAGE_CACHE_SHIFT);
+    	virt = kmap(pgs[i]);
+    	rc = ecryptfs_read_lower(virt, offset, PAGE_SIZE, ind);
+
 	if (rc < 0) {
 	    printk(KERN_ERR "Error attempting to read lower page; rc "
 			    "= [%d] \n", rc);
-	    goto out;
 	}
+	kunmap(pgs[i]);
+	flush_dcache_page(pgs[i]);
 
 	sg_set_page(sgs+i, pgs[i], PAGE_SIZE, 0);
     }

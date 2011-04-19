@@ -302,6 +302,9 @@ struct ecryptfs_inode_info {
 	struct inode vfs_inode;
 	struct inode *wii_inode;
 	struct file *lower_file;
+	/*size_t nrpages;
+	size_t cur_page;
+	struct page **pgs;*/
 	struct mutex lower_file_mutex;
 	struct ecryptfs_crypt_stat crypt_stat;
 };
@@ -662,6 +665,8 @@ void ecryptfs_destroy_mount_crypt_stat(
 int ecryptfs_init_crypt_ctx(struct ecryptfs_crypt_stat *crypt_stat);
 int ecryptfs_write_inode_size_to_metadata(struct inode *ecryptfs_inode);
 int ecryptfs_encrypt_page(struct page *page);
+int ecryptfs_encrypt_pages(struct page **pgs, unsigned int nr_pages);
+int ecryptfs_encrypt_pages2(struct page **pgs, unsigned int nr_pages);
 int ecryptfs_decrypt_pages(struct page **pgs, unsigned int nr_pages);
 int ecryptfs_decrypt_page(struct page *page);
 int ecryptfs_write_metadata(struct dentry *ecryptfs_dentry);
@@ -738,6 +743,7 @@ int ecryptfs_write_lower_page_segment(struct inode *ecryptfs_inode,
 				      struct page *page_for_lower,
 				      size_t offset_in_page, size_t size);
 int ecryptfs_write(struct inode *inode, char *data, loff_t offset, size_t size);
+int ecryptfs_write2(struct inode *inode, char *data, loff_t offset, size_t size);
 int ecryptfs_read_lower(char *data, loff_t offset, size_t size,
 			struct inode *ecryptfs_inode);
 int ecryptfs_read_lower_page_segment(struct page *page_for_ecryptfs,

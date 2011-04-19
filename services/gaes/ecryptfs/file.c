@@ -337,18 +337,56 @@ const struct file_operations ecryptfs_dir_fops = {
 	.llseek = default_llseek,
 };
 
-static ssize_t eread(struct file *f, char __user *b, size_t l, loff_t *p)
+static ssize_t ecryptfs_file_write(struct file *f, const char __user *buf,
+				   size_t sz, loff_t *poffset)
 {
-    printk("ecryptfs %s Read: %lu at %lu\n", current->comm, (unsigned long)l,
-	   (unsigned long)(p?*p:0));
-    return do_sync_read(f, b, l, p);
+    ecryptfs_write2(f->f_path.dentry->d_inode, (char*)buf, *poffset, sz);
+    return sz;
 }
+
+/*static ssize_t ecryptfs_file_write(struct file *f, const char __user *buf,
+				   size_t sz, loff_t *poffset)
+{
+    struct page **pgs;
+    char *virt;
+    int i,j;
+    ssize_t rt;
+    int nrpages = sz/PAGE_SIZE;
+    if (sz&(PAGE_SIZE-1))
+	nrpages += 1;
+
+    pgs = kmalloc(nrpages*sizeof(struct page*). GFP_KERNEL);
+    for (i=0; i<nrpages; i++) {
+	pgs[i] = alloc_page((i==nrpages-1)?GFP_USER|__GFP_ZERO:GFP_USER);
+	if (!pgs[i]) {
+	    printk("[g-ecryptfs] Error: allocate page failed\n");
+	    rt = -ENOMEM;
+	    goto errout;
+	}
+	virt = kmap(pgs[i]);
+	memcpy(virt, buf+i*PAGE_SIZE,
+	       (i==nrpages-1)?(sz&(PAGE_SIZE-1)):PAGE_SIZE);
+	kunmap(pgs[i]);	
+    }
+
+    ecryptfs_crypto_encrypt_pages(pgs, nrpages, 1);
+
+    for (i=0; i<nrpages; i++) {
+	rt = ecryptfs_write_lower(,
+
+errout:
+    for (j=0; j<i; j++) {
+	__free_page(pgs[i]);
+    }
+
+    return rt;
+    }*/
 
 const struct file_operations ecryptfs_main_fops = {
 	.llseek = generic_file_llseek,
 	.read = do_sync_read,
 	.aio_read = ecryptfs_read_update_atime,
-	.write = do_sync_write,
+	.write = ecryptfs_file_write,
 	.aio_write = generic_file_aio_write,
 	.readdir = ecryptfs_readdir,
 	.unlocked_ioctl = ecryptfs_unlocked_ioctl,

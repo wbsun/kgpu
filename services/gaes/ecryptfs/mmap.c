@@ -448,13 +448,13 @@ out:
 static int ecryptfs_readpages(struct file *filp, struct address_space *mapping,
 			      struct list_head *pages, unsigned nr_pages)
 {
-        struct ecryptfs_crypt_stat *crypt_stat =
-	    &ecryptfs_inode_to_private(mapping->host)->crypt_stat;
+	struct ecryptfs_crypt_stat *crypt_stat =
+	    		&ecryptfs_inode_to_private(mapping->host)->crypt_stat;
 	struct page **pgs = NULL;
 	unsigned int page_idx = 0;
 	int rc = 0;
-	int nodec = 0;
-	/* u32 sz = 0; */
+	int nodec = 0;	//no decryption needed flag
+	u32 sz = 0; 
 
 	if (!crypt_stat
 	    || !(crypt_stat->flags & ECRYPTFS_ENCRYPTED)
@@ -478,19 +478,18 @@ static int ecryptfs_readpages(struct file *filp, struct address_space *mapping,
 	for (page_idx = 0; page_idx < nr_pages; page_idx++) {
 	    struct page *page = list_entry(pages->prev, struct page, lru);
 	    list_del(&page->lru);
-	    if (add_to_page_cache_lru(page, mapping,
-				      page->index, GFP_KERNEL)) {
-		printk("[g-eCryptfs] INFO: cannot add page %lu to cache lru\n",
-		       (unsigned long)(page->index));
+	    if (add_to_page_cache_lru(page, mapping, page->index, GFP_KERNEL)) {
+			printk("[g-eCryptfs] INFO: cannot add page %lu to cache lru\n",
+												(unsigned long)(page->index));
 	    } else {
 		if (nodec)
 		    rc |= ecryptfs_readpage(filp, page);
 	    }
 
 	    if (nodec)
-		page_cache_release(page);
+			page_cache_release(page);
 	    else
-		pgs[page_idx] = page;
+			pgs[page_idx] = page;
 	}
 
 	if (!nodec) {

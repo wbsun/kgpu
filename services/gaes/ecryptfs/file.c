@@ -340,7 +340,9 @@ const struct file_operations ecryptfs_dir_fops = {
 static ssize_t ecryptfs_file_write(struct file *f, const char __user *buf,
 				   size_t sz, loff_t *poffset)
 {
+    /* printk("[g-ecryptfs] Info: write %u at %u\n", sz, *poffset); */
     ecryptfs_write2(f->f_path.dentry->d_inode, (char*)buf, *poffset, sz);
+    *poffset += sz;
     return sz;
 }
 

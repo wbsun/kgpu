@@ -73,7 +73,7 @@ static int ecryptfs_writepage(struct page *page, struct writeback_control *wbc)
 {
 	int rc;
 
-	printk("[g-ecryptfs] Info: write single page\n");
+	/* printk("[g-ecryptfs] Info: write single page\n"); */
 	rc = ecryptfs_encrypt_page(page);
 	if (rc) {
 		ecryptfs_printk(KERN_WARNING, "Error encrypting "
@@ -107,7 +107,7 @@ static int ecryptfs_writepages(struct address_space *mapping,
 	struct page **pgs;
 	int pgidx;
 	
-	printk("[g-ecryptfs] Info: call writepages\n");
+	/* printk("[g-ecryptfs] Info: call writepages\n"); */
 
 	pgs = kmalloc(sizeof(struct page*)*PAGEVEC_SIZE, GFP_KERNEL);
 	if (!pgs) {
@@ -560,7 +560,7 @@ static int ecryptfs_write_begin(struct file *file,
 		return -ENOMEM;
 	*pagep = page;
 
-	printk("[g-ecryptfs] Info: write begin %lu, %u\n", (unsigned long)pos, len);
+	/* printk("[g-ecryptfs] Info: write begin %lu, %u\n", (unsigned long)pos, len); */
 
 	prev_page_end_size = ((loff_t)index << PAGE_CACHE_SHIFT);
 	if (!PageUptodate(page)) {
@@ -760,7 +760,7 @@ static int ecryptfs_write_end(struct file *file,
 		&ecryptfs_inode_to_private(ecryptfs_inode)->crypt_stat;
 	int rc;
 
-	printk("[g-ecryptfs] Info: write end %lu, %u\n", (unsigned long)pos, len);
+	/* printk("[g-ecryptfs] Info: write end %lu, %u\n", (unsigned long)pos, len); */
 
 	if (crypt_stat->flags & ECRYPTFS_NEW_FILE) {
 		ecryptfs_printk(KERN_DEBUG, "ECRYPTFS_NEW_FILE flag set in "
@@ -853,6 +853,6 @@ const struct address_space_operations ecryptfs_aops = {
 	.readpages = ecryptfs_readpages,
 	.write_begin = ecryptfs_write_begin,
 	.write_end = ecryptfs_write_end,
-	.writepages = ecryptfs_writepages,
+	/* .writepages = ecryptfs_writepages, */
 	.bmap = ecryptfs_bmap,
 };

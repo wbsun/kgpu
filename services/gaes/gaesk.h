@@ -12,6 +12,11 @@
 
 #define GAES_ECB_SIZE_THRESHOLD (PAGE_SIZE)
 
+struct async_gaes_info {
+    int (*callback)(struct async_gaes_info*);
+    void *data;
+};
+
 static void cvt_endian_u32(u32* buf, int n)
 {
   u8* b = (u8*)buf;

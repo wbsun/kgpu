@@ -557,6 +557,7 @@ int ecryptfs_encrypt_pages2(struct page **pgs, unsigned int nr_pages)
 	unsigned int i=0;
 	u32 sz = 0;
 	struct page *p=NULL;
+	loff_t offset;
 
 	if (!nr_pages || !pgs || !pgs[0]) {
 		goto out;
@@ -605,8 +606,14 @@ int ecryptfs_encrypt_pages2(struct page **pgs, unsigned int nr_pages)
 	rc = 0;
 	
 	for (i=0; i<nr_pages; i++) {
-		p = sg_page(sgd+i);		
-		ecryptfs_write_lower_page_segment(ind, p, 0, PAGE_SIZE);	
+	    char *virt;
+		p = sg_page(sgd+i);
+		virt = kmap(p);
+		offset = ecryptfs_lower_header_size(cst) +
+		    (((loff_t)pgs[i]->index)<< PAGE_CACHE_SHIFT);
+		ecryptfs_write_lower(ind, virt, offset, PAGE_SIZE);
+		/* ecryptfs_write_lower_page_segment(ind, p, 0, PAGE_SIZE); */
+		kunmap(p);
 		__free_page(p);			
 	}
 	

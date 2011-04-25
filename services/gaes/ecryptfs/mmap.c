@@ -480,7 +480,7 @@ static int ecryptfs_readpages(struct file *filp, struct address_space *mapping,
 	    list_del(&page->lru);
 	    if (add_to_page_cache_lru(page, mapping, page->index, GFP_KERNEL)) {
 			printk("[g-eCryptfs] INFO: cannot add page %lu to cache lru\n",
-												(unsigned long)(page->index));
+			       (unsigned long)(page->index));
 	    } else {
 		if (nodec)
 		    rc |= ecryptfs_readpage(filp, page);

@@ -11,10 +11,11 @@
 #define __GAES_COMMON_H__
 
 struct gaes_ctr_info {
-	u32 key_enc[AES_MAX_KEYLENGTH_U32];
-	u32 key_dec[AES_MAX_KEYLENGTH_U32];
-	u32 key_length;
-	
+    u32 key_enc[AES_MAX_KEYLENGTH_U32];
+    u32 key_dec[AES_MAX_KEYLENGTH_U32];
+    u32 key_length;
+    u8  ctrblk[AES_BLOCK_SIZE];	
 };
+
 
 #endif

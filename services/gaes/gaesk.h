@@ -20,6 +20,15 @@ struct async_gaes_info {
 };
 
 
+static void big_u128_add(u8 *ctr, u64 offset, u8 *res)
+{
+    u64 c = be64_to_cpu((u64*)(ctr+8));
+
+    c += offset;
+    *(u64*)(res) = *(u64*)(ctr);
+    *(u64*)(res+8) = cpu_to_be64(c);
+}
+
 static void cvt_endian_u32(u32* buf, int n)
 {
   u8* b = (u8*)buf;

@@ -26,5 +26,52 @@ or goto https://github.com/wbsun/kgpu .*
 As for copyright license, we use GPLv2.
 
 
+Try it?
+
+Hardware:
+	We use GTX480. You don't need such high-end video card, but
+	you should have a NVIDIA card that support CUDA computing
+	capability 2.0 or higher.
+
+Software:
+	We compile the CUDA code with nvcc in CUDA 3.2. The OS kernel
+	is vanilla Linux 2.6.38.
+
+Make and Run it:
+     Check out the code from Github or download the archive from Google
+     Code and extract files into say kgpu directory:
+     cd kgpu
+     cd kgpu && make all && cd -
+     cd services/gaes/gaes_ecb/ && make all && cd -
+     cd services/gaes/libsrv_gaes && make all && cd -
+     cd services/gaes/ecryptfs && make all && cd -
+     cd kgpu && sudo insmod kgpu.ko && cd -
+     
+     STOP here, you need do dmesg to check what device numbers kgpu got.
+     By doing: dmesg | tail -n 10, you'll find such line:
+     "[kgpu] Info: major <xxx>" where <xxx> is number, say 250.
+     Then you create a device file in /dev by doing:
+     sudo mknod /dev/kgpu c <xxx> 0
+     <xxx> is the number in the line outputed by dmesg.
+     
+     Then:
+     sudo insmod services/gaes/gaes_ecb/gaes_ecb.ko
+     sudo kgpu/helper -l <absolute-path-of-current-dir>/services/gaes/libsrv_gaes
+
+     OK, now KGPU is and the GPU-cipher is fine and helper is running.
+     If you want to use eCryptfs, keep helper running, open
+     another terminal or console in current directory:
+     sudo rmmod ecryptfs && sudo insmod service/gaes/ecryptfs/ecryptfs.ko
+
+     Then mount you eCryptfs partition. To use GPU cipher, you should
+     use AES with 16Byte key.
+
+     To stop it:
+     Umount your eCryptfs partition and:
+     sudo rmmod ecryptfs
+     Stop "helper" program.
+     sudo rmmod gaes && sudo rmmod kgpu     
+     
+
 Weibin Sun, Xing Lin
 {wbsun, xinglin}@cs.utah.edu

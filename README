@@ -32,10 +32,16 @@ Hardware:
 	We use GTX480. You don't need such high-end video card, but
 	you should have a NVIDIA card that support CUDA computing
 	capability 2.0 or higher.
+	If you don't have more than 512M video memory, change
+	KGPU_BUF_NR and KGPU_BUF_SIZE in kgpu/kgpu.h to make sure
+	KGPU_BUF_NR*KGPU_BUF_SIZE < Size of Your Video Memory - (x)
+	where the max of x is a value that you need try some times
+	to figure out. Or simply leave x = 64M or 128M.
 
 Software:
 	We compile the CUDA code with nvcc in CUDA 3.2. The OS kernel
-	is vanilla Linux 2.6.38.
+	is vanilla Linux 2.6.38. You need a 64bit linux kernel compiled
+	targeting at x86_64!
 
 Make and Run it:
      Check out the code from Github or download the archive from Google

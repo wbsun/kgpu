@@ -174,19 +174,19 @@ out:
 
 static int __init taes_init(void)
 {
-	printk("test gecb loaded\n");
+	printk("test gaes_ecb loaded\n");
 	test_aes();
 	return 0;
 }
 
 static void __exit taes_exit(void)
 {
-	printk("test gecb unloaded\n");
+	printk("test gaes_ecb unloaded\n");
 }
 
 module_init(taes_init);
 module_exit(taes_exit);
 
-MODULE_DESCRIPTION("Test CUDA ECB-AES");
+MODULE_DESCRIPTION("Test CUDA AES-ECB");
 MODULE_LICENSE("GPL");
 

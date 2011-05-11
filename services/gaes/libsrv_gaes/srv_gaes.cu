@@ -20,16 +20,26 @@
 
 #define BPT_BYTES_PER_BLOCK 4096
 
-struct service gecb_enc_srv;
-struct service gecb_dec_srv;
+struct service gaes_ecb_enc_srv;
+struct service gaes_ecb_dec_srv;
 
-struct service bp4t_gecb_enc_srv;
-struct service bp4t_gecb_dec_srv;
+struct service gaes_ctr_srv;
 
-struct gecb_data {
-        u32 *d_key;
-        u32 *h_key;
-        int nrounds;
+struct service bp4t_gaes_ecb_enc_srv;
+struct service bp4t_gaes_ecb_dec_srv;
+
+struct gaes_ecb_data {
+    u32 *d_key;
+    u32 *h_key;
+    int nrounds;
+};
+
+struct gaes_ctr_data {
+    u32 *d_key;
+    u32 *h_key;
+    u8 *d_ctr;
+    u8 *h_ctr;
+    int nrounds;
 };
 
 static void dump_hex(u8* p, int rs, int cs)
@@ -72,7 +82,7 @@ __device__ u64 thread_ctr_offset()
     return (u64)(blockIdx.x*blockDim.x+threadIdx.x);
 }
 
-__global__ void aes_ctr_crypt_bpt(u32 *rk, int nrounds, u8 *text, u8 *ctr)
+__global__ void aes_ctr_crypt(u32 *rk, int nrounds, u8 *text, u8 *ctr)
 {
     u32 s[4];
     u32 t[4];
@@ -528,8 +538,7 @@ __global__ void aes_decrypt_bp4t(u32 *rk, int nrounds, u8* text)
   PUTU32((u32*)((u32*)text+bid*WORDS_PER_BLOCK+lid), s[lid]);
 }
 
-
-int gecb_compute_size_bpt(struct service_request *sr)
+int gaes_ecb_compute_size_bpt(struct service_request *sr)
 {
     sr->block_x = sr->kureq.outsize>=BPT_BYTES_PER_BLOCK? BPT_BYTES_PER_BLOCK/16: sr->kureq.outsize/16;
     sr->grid_x = sr->kureq.outsize/BPT_BYTES_PER_BLOCK? sr->kureq.outsize/BPT_BYTES_PER_BLOCK:1;
@@ -539,7 +548,7 @@ int gecb_compute_size_bpt(struct service_request *sr)
     return 0;
 }
 
-int gecb_compute_size_bp4t(struct service_request *sr)
+int gaes_ecb_compute_size_bp4t(struct service_request *sr)
 {
     sr->block_y = sr->kureq.outsize>=BYTES_PER_BLOCK? BYTES_PER_BLOCK/BYTES_PER_GROUP: (sr->kureq.outsize/BYTES_PER_GROUP);
     sr->grid_x = sr->kureq.outsize/BYTES_PER_BLOCK? sr->kureq.outsize/BYTES_PER_BLOCK:1;
@@ -549,40 +558,40 @@ int gecb_compute_size_bp4t(struct service_request *sr)
     return 0;
 }
 
-int gecb_launch_bpt(struct service_request *sr)
+int gaes_ecb_launch_bpt(struct service_request *sr)
 {
-        struct gecb_data *data = (struct gecb_data*)sr->data;
-        
-        if (sr->s == &gecb_dec_srv)        
-        	aes_decrypt_bpt<<<dim3(sr->grid_x, sr->grid_y), dim3(sr->block_x, sr->block_y), 0, (cudaStream_t)(sr->stream)>>>
-                (data->d_key, data->nrounds, (u8*)sr->doutput);
-        else
-	    aes_encrypt_bpt/*aes_encrypt_withpointer*/<<<dim3(sr->grid_x, sr->grid_y), dim3(sr->block_x, sr->block_y), 0, (cudaStream_t)(sr->stream)>>>
-                (data->d_key, data->nrounds, (u8*)sr->doutput);
-        return 0;
+    struct gaes_ecb_data *data = (struct gaes_ecb_data*)sr->data;
+    
+    if (sr->s == &gaes_ecb_dec_srv)        
+	aes_decrypt_bpt<<<dim3(sr->grid_x, sr->grid_y), dim3(sr->block_x, sr->block_y), 0, (cudaStream_t)(sr->stream)>>>
+	    (data->d_key, data->nrounds, (u8*)sr->doutput);
+    else
+	aes_encrypt_bpt/*aes_encrypt_withpointer*/<<<dim3(sr->grid_x, sr->grid_y), dim3(sr->block_x, sr->block_y), 0, (cudaStream_t)(sr->stream)>>>
+	    (data->d_key, data->nrounds, (u8*)sr->doutput);
+    return 0;
 }
 
-int gecb_launch_bp4t(struct service_request *sr)
+int gaes_ecb_launch_bp4t(struct service_request *sr)
 {
-        struct gecb_data *data = (struct gecb_data*)sr->data;
-        
-        if (sr->s == &gecb_dec_srv)        
-        	aes_decrypt_bp4t<<<dim3(sr->grid_x, sr->grid_y), dim3(sr->block_x, sr->block_y), 0, (cudaStream_t)(sr->stream)>>>
-                (data->d_key, data->nrounds, (u8*)sr->doutput);
-        else
-        	aes_encrypt_bp4t<<<dim3(sr->grid_x, sr->grid_y), dim3(sr->block_x, sr->block_y), 0, (cudaStream_t)(sr->stream)>>>
-                (data->d_key, data->nrounds, (u8*)sr->doutput);
-        return 0;
+    struct gaes_ecb_data *data = (struct gaes_ecb_data*)sr->data;
+    
+    if (sr->s == &gaes_ecb_dec_srv)        
+	aes_decrypt_bp4t<<<dim3(sr->grid_x, sr->grid_y), dim3(sr->block_x, sr->block_y), 0, (cudaStream_t)(sr->stream)>>>
+	    (data->d_key, data->nrounds, (u8*)sr->doutput);
+    else
+	aes_encrypt_bp4t<<<dim3(sr->grid_x, sr->grid_y), dim3(sr->block_x, sr->block_y), 0, (cudaStream_t)(sr->stream)>>>
+	    (data->d_key, data->nrounds, (u8*)sr->doutput);
+    return 0;
 }
 
-int gecb_prepare(struct service_request *sr)
+int gaes_ecb_prepare(struct service_request *sr)
 {
     cudaStream_t s = (cudaStream_t)(sr->stream);//get_stream(sr->stream_id);
-    struct gecb_data *data = (struct gecb_data *)malloc(sizeof(struct gecb_data));
+    struct gaes_ecb_data *data = (struct gaes_ecb_data *)malloc(sizeof(struct gaes_ecb_data));
     struct crypto_aes_ctx *ctx = (struct crypto_aes_ctx*)((u8*)(sr->kureq.input) + (sr->kureq.outsize));
     
     data->nrounds = ctx->key_length/4+6;
-    data->h_key = (sr->s == &gecb_dec_srv)?ctx->key_dec: ctx->key_enc;                         
+    data->h_key = (sr->s == &gaes_ecb_dec_srv)?ctx->key_dec: ctx->key_enc;                         
     data->d_key = (u32*)((u8*)(sr->dinput) + ((u8*)data->h_key - (u8*)sr->kureq.input));
     sr->data = data;
     
@@ -590,7 +599,7 @@ int gecb_prepare(struct service_request *sr)
     return 0;
 }
 
-int gecb_post(struct service_request *sr)
+int gaes_ecb_post(struct service_request *sr)
 {
     cudaStream_t s = (cudaStream_t)(sr->stream);//get_stream(sr->stream_id);
     csc( ad2hcpy( sr->kureq.output, sr->doutput, sr->kureq.outsize, s) );
@@ -600,54 +609,85 @@ int gecb_post(struct service_request *sr)
     return 0;
 }
 
+#define gaes_ctr_compute_size gaes_ecb_compute_size_bpt
+#define gaes_ctr_post gaes_ecb_post
+
+int gaes_ctr_launch(struct service_request *sr)
+{
+    struct gaes_ctr_data *data = (struct gaes_ctr_data*)sr->data;
+
+    aes_ctr_crypt<<<dim3(sr->grid_x, sr->grid_y), dim3(sr->block_x, sr->block_y), 0, (cudaStream_t)(sr->stream)>>>
+	(data->d_key, data->nrounds, (u8*)sr->doutput, data->d_ctr);
+    return 0;
+}
+
+int gaes_ctr_prepare(struct service_request *sr)
+{
+    cudaStream_t s = (cudaStream_t)(sr->stream);
+    struct gaes_ctr_data *data = (struct gaes_ctr_data *)malloc(sizeof(struct gaes_ctr_data));
+    struct crypto_gaes_ctr_info *info = (struct crypto_gaes_ctr_info*)
+	((u8*)(sr->kureq.input) + (sr->kureq.outsize));
+    
+    data->nrounds = info->key_length/4+6;
+    data->h_key = info->key_enc;
+    data->d_key = (u32*)((u8*)(sr->dinput) + ((u8*)data->h_key - (u8*)sr->kureq.input));
+    data->h_ctr = info->ctrblk;
+    data->d_ctr = (u8*)((u8*)(sr->dinput) + ((u8*)data->h_ctr - (u8*)sr->kureq.input));
+    sr->data = data;
+    
+    csc( ah2dcpy( sr->dinput, sr->kureq.input, sr->kureq.insize, s) );
+    return 0;
+}
 
 extern "C" int init_service(void *lh, int (*reg_srv)(struct service*, void*))
 {
     int err;
-    printf("[libsrv_gecb] Info: init gecb service\n");
+    printf("[libsrv_gaes] Info: init gaes services\n");
     
-    sprintf(gecb_enc_srv.name, "gecb-enc");
-    gecb_enc_srv.sid = 0;
-    gecb_enc_srv.compute_size = gecb_compute_size_bpt;
-    gecb_enc_srv.launch = gecb_launch_bpt;
-    gecb_enc_srv.prepare = gecb_prepare;
-    gecb_enc_srv.post = gecb_post;
+    sprintf(gaes_ecb_enc_srv.name, "gaes_ecb-enc");
+    gaes_ecb_enc_srv.sid = 0;
+    gaes_ecb_enc_srv.compute_size = gaes_ecb_compute_size_bpt;
+    gaes_ecb_enc_srv.launch = gaes_ecb_launch_bpt;
+    gaes_ecb_enc_srv.prepare = gaes_ecb_prepare;
+    gaes_ecb_enc_srv.post = gaes_ecb_post;
     
-    sprintf(gecb_dec_srv.name, "gecb-dec");
-    gecb_dec_srv.sid = 0;
-    gecb_dec_srv.compute_size = gecb_compute_size_bpt;
-    gecb_dec_srv.launch = gecb_launch_bpt;
-    gecb_dec_srv.prepare = gecb_prepare;
-    gecb_dec_srv.post = gecb_post;
-    
-    err = reg_srv(&gecb_enc_srv, lh);
+    sprintf(gaes_ecb_dec_srv.name, "gaes_ecb-dec");
+    gaes_ecb_dec_srv.sid = 0;
+    gaes_ecb_dec_srv.compute_size = gaes_ecb_compute_size_bpt;
+    gaes_ecb_dec_srv.launch = gaes_ecb_launch_bpt;
+    gaes_ecb_dec_srv.prepare = gaes_ecb_prepare;
+    gaes_ecb_dec_srv.post = gaes_ecb_post;
+
+    sprintf(gaes_ctr_srv.name, "gaes_ctr");
+    gaes_ctr_srv.sid = 0;
+    gaes_ctr_srv.compute_size = gaes_ctr_compute_size;
+    gaes_ctr_srv.launch = gaes_ctr_launch;
+    gaes_ctr_srv.prepare = gaes_ctr_prepare;
+    gaes_ctr_srv.post = gaes_ctr_post;
+
+    err = reg_srv(&gaes_ecb_enc_srv, lh);
+    err |= reg_srv(&gaes_ecb_dec_srv, lh);
+    err |= reg_srv(&gaes_ctr_srv, lh);
     if (err) {
-    	fprintf(stderr, "[libsrv_gecb] Error: failed to register enc service\n");
-    } else {
-        err = reg_srv(&gecb_dec_srv, lh);
-        if (err) {
-    	    fprintf(stderr, "[libsrv_gecb] Error: failed to register dec service\n");
-        }
-    }
+    	fprintf(stderr, "[libsrv_gaes] Error: failed to register gaes services\n");
+    } 
     
     return err;
 }
 
 extern "C" int finit_service(void *lh, int (*unreg_srv)(const char*))
 {
-    int err1, err2;
-    printf("[libsrv_gecb] Info: finit gecb service\n");
+    int err;
+    printf("[libsrv_gaes] Info: finit gaes services\n");
     
-    err1 = unreg_srv(gecb_enc_srv.name);
-    if (err1) {
-    	fprintf(stderr, "[libsrv_gecb] Error: failed to unregister enc service\n");
-    }
-    err2 = unreg_srv(gecb_dec_srv.name);
-    if (err2) {
-    	fprintf(stderr, "[libsrv_gecb] Error: failed to unregister dec service\n");
+    err = unreg_srv(gaes_ecb_enc_srv.name);
+    err |= unreg_srv(gaes_ecb_dec_srv.name);
+    err |= unreg_srv(gaes_ctr_srv.name);
+    if (err) {
+    	fprintf(stderr, "[libsrv_gaes] Error: failed to unregister gaes services\n");
     }
     
-    return err1 | err2;
+    return err;
 }
 
 

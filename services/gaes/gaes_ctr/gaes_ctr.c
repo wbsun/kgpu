@@ -1,4 +1,4 @@
-/*
+/* -*- linux-c -*-
  * This work is licensed under the terms of the GNU GPL, version 2.  See
  * the GPL-COPYING file in the top-level directory.
  *
@@ -8,6 +8,9 @@
  * GPU accelerated AES-CTR cipher
  * 
  * This module is mostly based on the crypto/ctr.c in Linux kernel.
+ *
+ * At this time, we support simple coutner mode only. CTR mode for
+ * IPSec is not implemented.
  *
  */
 
@@ -20,16 +23,14 @@
 #include <linux/random.h>
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
+#include <crypto/aes.h>
 #include "../../../kgpu/kkgpu.h"
 #include "../gaesk.h"
 
 struct crypto_ctr_ctx {
 	struct crypto_cipher *child;
-};
-
-struct crypto_rfc3686_ctx {
-	struct crypto_blkcipher *child;
-	u8 nonce[CTR_RFC3686_NONCE_SIZE];
+	struct crypto_gaes_ctr_info info;
+	u8 key[32];	
 };
 
 static int crypto_ctr_setkey(struct crypto_tfm *parent, const u8 *key,
@@ -42,7 +43,17 @@ static int crypto_ctr_setkey(struct crypto_tfm *parent, const u8 *key,
 	crypto_cipher_clear_flags(child, CRYPTO_TFM_REQ_MASK);
 	crypto_cipher_set_flags(child, crypto_tfm_get_flags(parent) &
 				CRYPTO_TFM_REQ_MASK);
+	
 	err = crypto_cipher_setkey(child, key, keylen);
+	err = crypto_aes_expand_key(
+		(struct crypto_aes_ctx*)(&ctx->info),  /* yes, this is dangerous */
+		key, keylen);
+
+	cvt_endian_u32(ctx->info.key_enc, AES_MAX_KEYLENGTH_U32);
+	cvt_endian_u32(ctx->info.key_dec, AES_MAX_KEYLENGTH_U32);
+
+	memcpy(ctx->key, key, keylen);
+	
 	crypto_tfm_set_flags(parent, crypto_cipher_get_flags(child) &
 			     CRYPTO_TFM_RES_MASK);
 
@@ -152,6 +163,116 @@ static int crypto_ctr_crypt(struct blkcipher_desc *desc,
 	return err;
 }
 
+static int _crypto_gaes_ctr_crypt(struct blkcipher_desc *desc,
+                            struct scatterlist *dst, struct scatterlist *src,
+				   unsigned int sz)
+{
+	int err=0;
+	unsigned int nbytes;
+	u8* gpos;
+	int i = 0;
+	u8 *ctrblk;	
+    
+	struct kgpu_req *req;
+	struct kgpu_resp *resp;
+	struct kgpu_buffer *buf;
+	
+	struct crypto_blkcipher *tfm = desc->tfm;
+	struct crypto_ctr_ctx *ctx = crypto_blkcipher_ctx(tfm);
+	struct blkcipher_walk walk;
+
+	blkcipher_walk_init(&walk, dst, src, sz);
+    
+	buf = alloc_gpu_buffer();
+	if (!buf) {
+		printk("[gaes_ctr] Error: GPU buffer is null.\n");
+		return -EFAULT;
+	}
+	
+	req = alloc_kgpu_request();
+	resp = alloc_kgpu_response();
+	if (!req || !resp) {
+		return -EFAULT;
+	}
+	
+	err = blkcipher_walk_virt(desc, &walk);
+	ctrblk = walk.iv;
+	
+	while ((nbytes = walk.nbytes)) {
+		u8 *wsrc = walk.src.virt.addr;
+		if (nbytes > KGPU_BUF_FRAME_SIZE) {
+			return -EFAULT;
+		}
+		
+#ifndef _NDEBUG
+		if (nbytes != PAGE_SIZE)
+			printk("[gaes_ctr] WARNING: %u is not PAGE_SIZE\n", nbytes);
+		
+#endif
+		
+		gpos = buf->paddrs[i++];
+		memcpy(__va(gpos), wsrc, nbytes);
+		
+		err = blkcipher_walk_done(desc, &walk, 0);
+	}
+	
+	gpos = buf->paddrs[i];
+	memcpy(__va(gpos), &(ctx->info), sizeof(struct crypto_gaes_ctr_info));
+	memcpy(((struct crypto_gaes_ctr_info*)__va(gpos))->ctrblk, ctrblk,
+	       crypto_cipher_blocksize(ctx->child));
+	
+	strcpy(req->kureq.sname, "gaes_ctr");
+	req->kureq.input = buf->gb.addr;
+	req->kureq.output = buf->gb.addr;
+	req->kureq.insize = sz+PAGE_SIZE;
+	req->kureq.outsize = sz;
+	
+	if (call_gpu_sync(req, resp)) {
+		err = -EFAULT;
+		printk("[gaes_ctr] Error: callgpu error\n");
+	} else {
+		i=0;
+		blkcipher_walk_init(&walk, dst, src, sz);
+		err = blkcipher_walk_virt(desc, &walk);
+		
+		while ((nbytes = walk.nbytes)) {
+			u8 *wdst = walk.dst.virt.addr;
+			if (nbytes > KGPU_BUF_FRAME_SIZE) {
+				return -EFAULT;
+			}
+			
+#ifndef _NDEBUG
+			if (nbytes != PAGE_SIZE)
+				printk("[gaes_ctr] WARNING: %u is not PAGE_SIZE\n", nbytes);
+#endif
+			
+			gpos = buf->paddrs[i++];	
+			memcpy(wdst, __va(gpos), nbytes);       
+			
+			err = blkcipher_walk_done(desc, &walk, 0);
+		}
+
+		/* change counter value */
+		big_u128_add(ctrblk, sz/crypto_cipher_blocksize(ctx->child),
+			     ctrblk);
+	}
+	
+	free_kgpu_request(req);
+	free_kgpu_response(resp);
+	free_gpu_buffer(buf);
+	
+	return err;
+}
+
+static int crypto_gaes_ctr_crypt(struct blkcipher_desc *desc,
+			      struct scatterlist *dst, struct scatterlist *src,
+			      unsigned int nbytes)
+{
+	if ((nbytes % PAGE_SIZE) || nbytes <= GAES_CTR_SIZE_THRESHOLD)
+		return crypto_ctr_crypt(desc, dst, src, nbytes);
+	return _crypto_gaes_ctr_crypt(desc, dst, src, nbytes);
+}
+
 static int crypto_ctr_init_tfm(struct crypto_tfm *tfm)
 {
 	struct crypto_instance *inst = (void *)tfm->__crt_alg;
@@ -199,7 +320,7 @@ static struct crypto_instance *crypto_ctr_alloc(struct rtattr **tb)
 	if (alg->cra_blocksize % 4)
 		goto out_put_alg;
 
-	inst = crypto_alloc_instance("ctr", alg);
+	inst = crypto_alloc_instance("gaes_ctr", alg);
 	if (IS_ERR(inst))
 		goto out;
 
@@ -219,8 +340,8 @@ static struct crypto_instance *crypto_ctr_alloc(struct rtattr **tb)
 	inst->alg.cra_exit = crypto_ctr_exit_tfm;
 
 	inst->alg.cra_blkcipher.setkey = crypto_ctr_setkey;
-	inst->alg.cra_blkcipher.encrypt = crypto_ctr_crypt;
-	inst->alg.cra_blkcipher.decrypt = crypto_ctr_crypt;
+	inst->alg.cra_blkcipher.encrypt = crypto_gaes_ctr_crypt;
+	inst->alg.cra_blkcipher.decrypt = crypto_gaes_ctr_crypt;
 
 	inst->alg.cra_blkcipher.geniv = "chainiv";
 
@@ -240,182 +361,23 @@ static void crypto_ctr_free(struct crypto_instance *inst)
 }
 
 static struct crypto_template crypto_ctr_tmpl = {
-	.name = "ctr",
+	.name = "gaes_ctr",
 	.alloc = crypto_ctr_alloc,
 	.free = crypto_ctr_free,
 	.module = THIS_MODULE,
 };
 
-static int crypto_rfc3686_setkey(struct crypto_tfm *parent, const u8 *key,
-				 unsigned int keylen)
-{
-	struct crypto_rfc3686_ctx *ctx = crypto_tfm_ctx(parent);
-	struct crypto_blkcipher *child = ctx->child;
-	int err;
-
-	/* the nonce is stored in bytes at end of key */
-	if (keylen < CTR_RFC3686_NONCE_SIZE)
-		return -EINVAL;
-
-	memcpy(ctx->nonce, key + (keylen - CTR_RFC3686_NONCE_SIZE),
-	       CTR_RFC3686_NONCE_SIZE);
-
-	keylen -= CTR_RFC3686_NONCE_SIZE;
-
-	crypto_blkcipher_clear_flags(child, CRYPTO_TFM_REQ_MASK);
-	crypto_blkcipher_set_flags(child, crypto_tfm_get_flags(parent) &
-					  CRYPTO_TFM_REQ_MASK);
-	err = crypto_blkcipher_setkey(child, key, keylen);
-	crypto_tfm_set_flags(parent, crypto_blkcipher_get_flags(child) &
-				     CRYPTO_TFM_RES_MASK);
-
-	return err;
-}
-
-static int crypto_rfc3686_crypt(struct blkcipher_desc *desc,
-				struct scatterlist *dst,
-				struct scatterlist *src, unsigned int nbytes)
-{
-	struct crypto_blkcipher *tfm = desc->tfm;
-	struct crypto_rfc3686_ctx *ctx = crypto_blkcipher_ctx(tfm);
-	struct crypto_blkcipher *child = ctx->child;
-	unsigned long alignmask = crypto_blkcipher_alignmask(tfm);
-	u8 ivblk[CTR_RFC3686_BLOCK_SIZE + alignmask];
-	u8 *iv = PTR_ALIGN(ivblk + 0, alignmask + 1);
-	u8 *info = desc->info;
-	int err;
-
-	/* set up counter block */
-	memcpy(iv, ctx->nonce, CTR_RFC3686_NONCE_SIZE);
-	memcpy(iv + CTR_RFC3686_NONCE_SIZE, info, CTR_RFC3686_IV_SIZE);
-
-	/* initialize counter portion of counter block */
-	*(__be32 *)(iv + CTR_RFC3686_NONCE_SIZE + CTR_RFC3686_IV_SIZE) =
-		cpu_to_be32(1);
-
-	desc->tfm = child;
-	desc->info = iv;
-	err = crypto_blkcipher_encrypt_iv(desc, dst, src, nbytes);
-	desc->tfm = tfm;
-	desc->info = info;
-
-	return err;
-}
-
-static int crypto_rfc3686_init_tfm(struct crypto_tfm *tfm)
-{
-	struct crypto_instance *inst = (void *)tfm->__crt_alg;
-	struct crypto_spawn *spawn = crypto_instance_ctx(inst);
-	struct crypto_rfc3686_ctx *ctx = crypto_tfm_ctx(tfm);
-	struct crypto_blkcipher *cipher;
-
-	cipher = crypto_spawn_blkcipher(spawn);
-	if (IS_ERR(cipher))
-		return PTR_ERR(cipher);
-
-	ctx->child = cipher;
-
-	return 0;
-}
-
-static void crypto_rfc3686_exit_tfm(struct crypto_tfm *tfm)
-{
-	struct crypto_rfc3686_ctx *ctx = crypto_tfm_ctx(tfm);
-
-	crypto_free_blkcipher(ctx->child);
-}
-
-static struct crypto_instance *crypto_rfc3686_alloc(struct rtattr **tb)
-{
-	struct crypto_instance *inst;
-	struct crypto_alg *alg;
-	int err;
-
-	err = crypto_check_attr_type(tb, CRYPTO_ALG_TYPE_BLKCIPHER);
-	if (err)
-		return ERR_PTR(err);
-
-	alg = crypto_attr_alg(tb[1], CRYPTO_ALG_TYPE_BLKCIPHER,
-				  CRYPTO_ALG_TYPE_MASK);
-	err = PTR_ERR(alg);
-	if (IS_ERR(alg))
-		return ERR_PTR(err);
-
-	/* We only support 16-byte blocks. */
-	err = -EINVAL;
-	if (alg->cra_blkcipher.ivsize != CTR_RFC3686_BLOCK_SIZE)
-		goto out_put_alg;
-
-	/* Not a stream cipher? */
-	if (alg->cra_blocksize != 1)
-		goto out_put_alg;
-
-	inst = crypto_alloc_instance("rfc3686", alg);
-	if (IS_ERR(inst))
-		goto out;
-
-	inst->alg.cra_flags = CRYPTO_ALG_TYPE_BLKCIPHER;
-	inst->alg.cra_priority = alg->cra_priority;
-	inst->alg.cra_blocksize = 1;
-	inst->alg.cra_alignmask = alg->cra_alignmask;
-	inst->alg.cra_type = &crypto_blkcipher_type;
-
-	inst->alg.cra_blkcipher.ivsize = CTR_RFC3686_IV_SIZE;
-	inst->alg.cra_blkcipher.min_keysize = alg->cra_blkcipher.min_keysize
-					      + CTR_RFC3686_NONCE_SIZE;
-	inst->alg.cra_blkcipher.max_keysize = alg->cra_blkcipher.max_keysize
-					      + CTR_RFC3686_NONCE_SIZE;
-
-	inst->alg.cra_blkcipher.geniv = "seqiv";
-
-	inst->alg.cra_ctxsize = sizeof(struct crypto_rfc3686_ctx);
-
-	inst->alg.cra_init = crypto_rfc3686_init_tfm;
-	inst->alg.cra_exit = crypto_rfc3686_exit_tfm;
-
-	inst->alg.cra_blkcipher.setkey = crypto_rfc3686_setkey;
-	inst->alg.cra_blkcipher.encrypt = crypto_rfc3686_crypt;
-	inst->alg.cra_blkcipher.decrypt = crypto_rfc3686_crypt;
-
-out:
-	crypto_mod_put(alg);
-	return inst;
-
-out_put_alg:
-	inst = ERR_PTR(err);
-	goto out;
-}
-
-static struct crypto_template crypto_rfc3686_tmpl = {
-	.name = "gaes_ctr",
-	.alloc = crypto_rfc3686_alloc,
-	.free = crypto_ctr_free,
-	.module = THIS_MODULE,
-};
 
 static int __init crypto_ctr_module_init(void)
 {
 	int err;
 
 	err = crypto_register_template(&crypto_ctr_tmpl);
-	if (err)
-		goto out;
-
-	err = crypto_register_template(&crypto_rfc3686_tmpl);
-	if (err)
-		goto out_drop_ctr;
-
-out:
 	return err;
-
-out_drop_ctr:
-	crypto_unregister_template(&crypto_ctr_tmpl);
-	goto out;
 }
 
 static void __exit crypto_ctr_module_exit(void)
 {
-	crypto_unregister_template(&crypto_rfc3686_tmpl);
 	crypto_unregister_template(&crypto_ctr_tmpl);
 }
 
@@ -423,5 +385,4 @@ module_init(crypto_ctr_module_init);
 module_exit(crypto_ctr_module_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("CTR Counter block mode");
-MODULE_ALIAS("gaes_ctr");
+MODULE_DESCRIPTION("GPU AES-CTR Counter block mode");

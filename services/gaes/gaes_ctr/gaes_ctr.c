@@ -273,6 +273,17 @@ static int crypto_gaes_ctr_crypt(struct blkcipher_desc *desc,
 	return _crypto_gaes_ctr_crypt(desc, dst, src, nbytes);
 }
 
+static int crypto_gaes_lctr_crypt(struct blkcipher_desc *desc,
+			      struct scatterlist *dst, struct scatterlist *src,
+			      unsigned int nbytes)
+{
+	if (nbytes % PAGE_SIZE) {
+		printk("[gaes_ctr] Warnning: using local counter mode, but data size is not multiple of PAGE_SIZE\n");
+		return crypto_ctr_crypt(desc, dst, src, nbytes);
+	}		
+	return _crypto_gaes_ctr_crypt(desc, dst, src, nbytes);
+}
+
 static int crypto_ctr_init_tfm(struct crypto_tfm *tfm)
 {
 	struct crypto_instance *inst = (void *)tfm->__crt_alg;
@@ -296,7 +307,7 @@ static void crypto_ctr_exit_tfm(struct crypto_tfm *tfm)
 	crypto_free_cipher(ctx->child);
 }
 
-static struct crypto_instance *crypto_ctr_alloc(struct rtattr **tb)
+static struct crypto_instance *_crypto_ctr_alloc(struct rtattr **tb, int use_lctr)
 {
 	struct crypto_instance *inst;
 	struct crypto_alg *alg;
@@ -320,7 +331,10 @@ static struct crypto_instance *crypto_ctr_alloc(struct rtattr **tb)
 	if (alg->cra_blocksize % 4)
 		goto out_put_alg;
 
-	inst = crypto_alloc_instance("gaes_ctr", alg);
+	if (use_lctr)
+		inst = crypto_alloc_instance("gaes_lctr", alg);
+	else
+		inst = crypto_alloc_instance("gaes_ctr", alg);
 	if (IS_ERR(inst))
 		goto out;
 
@@ -340,8 +354,8 @@ static struct crypto_instance *crypto_ctr_alloc(struct rtattr **tb)
 	inst->alg.cra_exit = crypto_ctr_exit_tfm;
 
 	inst->alg.cra_blkcipher.setkey = crypto_ctr_setkey;
-	inst->alg.cra_blkcipher.encrypt = crypto_gaes_ctr_crypt;
-	inst->alg.cra_blkcipher.decrypt = crypto_gaes_ctr_crypt;
+	inst->alg.cra_blkcipher.encrypt = use_lctr?crypto_gaes_lctr_crypt:crypto_gaes_ctr_crypt;
+	inst->alg.cra_blkcipher.decrypt = use_lctr?crypto_gaes_lctr_crypt:crypto_gaes_ctr_crypt;
 
 	inst->alg.cra_blkcipher.geniv = "chainiv";
 
@@ -352,6 +366,16 @@ out:
 out_put_alg:
 	inst = ERR_PTR(err);
 	goto out;
+}
+
+static struct crypto_instance *crypto_ctr_alloc(struct rtattr **tb)
+{
+	return _crypto_ctr_alloc(tb, 0);
+}
+
+static struct crypto_instance *crypto_lctr_alloc(struct rtattr **tb)
+{
+	return _crypto_ctr_alloc(tb, 1);
 }
 
 static void crypto_ctr_free(struct crypto_instance *inst)
@@ -367,17 +391,25 @@ static struct crypto_template crypto_ctr_tmpl = {
 	.module = THIS_MODULE,
 };
 
+static struct crypto_template crypto_lctr_tmpl = {
+	.name = "gaes_lctr",
+	.alloc = crypto_lctr_alloc,
+	.free = crypto_ctr_free,
+	.module = THIS_MODULE,
+};
 
 static int __init crypto_ctr_module_init(void)
 {
 	int err;
 
 	err = crypto_register_template(&crypto_ctr_tmpl);
+	err |= crypto_register_template(&crypto_lctr_tmpl);
 	return err;
 }
 
 static void __exit crypto_ctr_module_exit(void)
 {
+	crypto_unregister_template(&crypto_lctr_tmpl);
 	crypto_unregister_template(&crypto_ctr_tmpl);
 }
 

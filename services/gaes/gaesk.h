@@ -24,7 +24,7 @@ struct async_gaes_info {
 /* only take the low-64bit for adding */
 static void big_u128_add(u8 *ctr, u64 offset, u8 *res)
 {
-    u64 c = be64_to_cpu((u64*)(ctr+8));
+    u64 c = be64_to_cpu(*(u64*)(ctr+8));
 
     c += offset;
     *(u64*)(res) = *(u64*)(ctr);
@@ -60,6 +60,18 @@ static void dump_page_content(u8 *p)
 	    printk("%02x ", p[r*32+c]);
 	printk("\n");
     }
+}
+
+static void dump_hex(u8 *p, int r, int c)
+{
+    int i,j;
+    printk("dump hex:\n");
+    for (i=0; i<r; i++) {
+	for (j=0; j<c; j++) {
+	    printk("%02x ", p[c*i+j]);
+	}
+	printk("\n");
+    }    
 }
 
 #endif

@@ -28,6 +28,7 @@
 #include <linux/cdev.h>
 #include <linux/fs.h>
 #include <linux/poll.h>
+#include <linux/slab.h>
 #include <asm/page.h>
 #include <asm/page_types.h>
 #include <asm/pgtable.h>
@@ -85,6 +86,9 @@ struct sync_call_data {
 	ku_callback oldcb;
 	int done;
 };
+
+static struct kmem_cache *kgpu_req_cache;
+static struct kmem_cache *kgpu_resp_cache;
 
 static int bad_address(void *p)
 {
@@ -248,38 +252,48 @@ int next_kgpu_request_id(void)
 }
 EXPORT_SYMBOL_GPL(next_kgpu_request_id);
 
-struct kgpu_req* alloc_kgpu_request(void)
+static void kgpu_req_constructor(void* data)
 {
-    struct kgpu_req *req = kmalloc(sizeof(struct kgpu_req), GFP_KERNEL);
+    struct kgpu_req *req = (struct kgpu_req*)data;
     if (req) {
 	req->kureq.id = next_kgpu_request_id();
 	INIT_LIST_HEAD(&req->list);
 	req->kureq.sname[0] = 0;
     }
+}
+
+struct kgpu_req* alloc_kgpu_request(void)
+{
+    struct kgpu_req *req = kmem_cache_alloc(kgpu_req_cache, GFP_KERNEL);    
     return req;
 }
 EXPORT_SYMBOL_GPL(alloc_kgpu_request);
 
 void free_kgpu_request(struct kgpu_req* req)
 {
-    kfree(req);
+    kmem_cache_free(kgpu_req_cache, req);
 }
 EXPORT_SYMBOL_GPL(free_kgpu_request);
 
-struct kgpu_resp* alloc_kgpu_response(void)
+static void kgpu_resp_constructor(void *data)
 {
-    struct kgpu_resp *resp = kmalloc(sizeof(struct kgpu_resp), GFP_KERNEL);
+    struct kgpu_resp *resp = (struct kgpu_resp*)data;
     if (resp) {
 	resp->kuresp.errcode = KGPU_NO_RESPONSE;
 	INIT_LIST_HEAD(&resp->list);
     }
+}
+
+struct kgpu_resp* alloc_kgpu_response(void)
+{
+    struct kgpu_resp *resp = kmem_cache_alloc(kgpu_resp_cache, GFP_KERNEL);
     return resp;
 }
 EXPORT_SYMBOL_GPL(alloc_kgpu_response);
 
 void free_kgpu_response(struct kgpu_resp* resp)
 {
-    kfree(resp);
+    kmem_cache_free(kgpu_resp_cache, resp);
 }
 EXPORT_SYMBOL_GPL(free_kgpu_response);
 
@@ -674,6 +688,22 @@ int kgpu_init(void)
     spin_lock_init(&ridlock);
     spin_lock_init(&buflock);
 
+    kgpu_req_cache = kmem_cache_create(
+	"kgpu_req_cache", sizeof(struct kgpu_req), 0,
+	SLAB_HWCACHE_ALIGN, kgpu_req_constructor);
+    if (!kgpu_req_cache) {
+	printk("[kgpu] Error: can't create request cache\n");
+	return -EFAULT;
+    }
+    kgpu_resp_cache = kmem_cache_create(
+	"kgpu_resp_cache", sizeof(struct kgpu_resp), 0,
+	SLAB_HWCACHE_ALIGN, kgpu_resp_constructor);
+    if (!kgpu_resp_cache) {
+	printk("[kgpu] Error: can't create response cache\n");
+	kmem_cache_destroy(kgpu_req_cache);
+	return -EFAULT;
+    }
+
     result = alloc_chrdev_region(&dev, 0, 1, KGPU_DEV_NAME);
     kgpu_major = MAJOR(dev);
 
@@ -702,6 +732,10 @@ void kgpu_cleanup(void)
     cdev_del(&kgpudev);
 
     unregister_chrdev_region(devno, 1);
+    if (kgpu_req_cache)
+	kmem_cache_destroy(kgpu_req_cache);
+    if (kgpu_resp_cache)
+	kmem_cache_destroy(kgpu_resp_cache);
 }
 EXPORT_SYMBOL_GPL(kgpu_cleanup);
 

@@ -26,6 +26,14 @@ or goto https://github.com/wbsun/kgpu .*
 As for copyright license, we use GPLv2.
 
 
+
+News:
+
+* dm-crypt can use gaes_ecb or gaes_ctr directly, although you won't get
+  correct data. Speedup is similar to ecryptfs. So just for performance.
+
+  
+
 Try it?
 
 Hardware:

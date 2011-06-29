@@ -14,11 +14,11 @@
 
 struct gpu_buffer {
     void *addr;
-    /* unsigned long size; */
+    unsigned long size;
 };
 
-#define KGPU_BUF_NR 32
-#define KGPU_BUF_SIZE (16*1024*1024)
+#define KGPU_BUF_NR 1
+#define KGPU_BUF_SIZE (1024*1024*1024)
 
 #define KGPU_DEV_NAME "kgpu"
 
@@ -31,6 +31,8 @@ struct ku_request {
     void *output;
     unsigned long insize;
     unsigned long outsize;
+    void *data;
+    unsigned long datasize;
 };
 
 /* kgpu's errno */

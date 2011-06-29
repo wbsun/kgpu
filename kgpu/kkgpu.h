@@ -20,9 +20,13 @@
 #define KGPU_BUF_FRAME_SIZE (4*1024)
 #define KGPU_BUF_FRAME_NR (KGPU_BUF_SIZE/KGPU_BUF_FRAME_SIZE)
 
+#define KGPU_BUF_UNIT_SIZE (128*1024)
+#define KGPU_BUF_NR_FRAMES_IN_UNIT (KGPU_BUF_UNIT_SIZE/KGPU_BUF_FRAME_SIZE)
+
 struct kgpu_buffer {
     struct gpu_buffer gb;
     void **paddrs;
+    unsigned int npages;
 };
 
 struct kgpu_req;
@@ -50,7 +54,7 @@ extern int call_gpu_sync(struct kgpu_req*, struct kgpu_resp*);
 extern int next_kgpu_request_id(void);
 extern struct kgpu_req* alloc_kgpu_request(void);
 extern struct kgpu_resp* alloc_kgpu_response(void);
-extern struct kgpu_buffer* alloc_gpu_buffer(void);
+extern struct kgpu_buffer* alloc_gpu_buffer(unsigned long nbytes);
 extern int free_gpu_buffer(struct kgpu_buffer *);
 extern void free_kgpu_response(struct kgpu_resp*);
 extern void free_kgpu_request(struct kgpu_req*);

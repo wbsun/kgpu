@@ -29,6 +29,7 @@
 #include <linux/fs.h>
 #include <linux/poll.h>
 #include <linux/slab.h>
+#include <linux/bitmap.h>
 #include <asm/page.h>
 #include <asm/page_types.h>
 #include <asm/pgtable.h>
@@ -42,7 +43,8 @@ struct kgpu_dev {
     struct cdev cdev;
 
     struct kgpu_buffer bufs[KGPU_BUF_NR];
-    int buf_uses[KGPU_BUF_NR];
+    unsigned long *buf_bitmaps[KGPU_BUF_NR];
+    /* int buf_uses[KGPU_BUF_NR]; */
     spinlock_t buflock;
 
     int rid_sequence;
@@ -61,7 +63,8 @@ struct kgpu_dev {
 static atomic_t kgpudev_av = ATOMIC_INIT(1);
 
 static struct kgpu_buffer kgpu_bufs[KGPU_BUF_NR];
-static int kgpu_buf_uses[KGPU_BUF_NR];
+static unsigned long *kgpu_buf_bitmaps[KGPU_BUF_NR];
+/* static int kgpu_buf_uses[KGPU_BUF_NR]; */
 static spinlock_t buflock;
 
 static int kgpu_rid_cnt = 0;
@@ -297,7 +300,7 @@ void free_kgpu_response(struct kgpu_resp* resp)
 }
 EXPORT_SYMBOL_GPL(free_kgpu_response);
 
-struct kgpu_buffer* alloc_gpu_buffer(void)
+struct kgpu_buffer* alloc_gpu_buffer(unsigned long nbytes)
 {
     int i;
     spin_lock(&buflock);
@@ -562,7 +565,7 @@ static void test_pages(unsigned long vaddr, unsigned long sz)
 
 static int set_gpu_bufs(char __user *buf)
 {
-    int off=0, i, j;
+    int off=0, i, j, nframes;
     
     spin_lock(&buflock);
 
@@ -570,23 +573,28 @@ static int set_gpu_bufs(char __user *buf)
 	copy_from_user(&(kgpu_bufs[i].gb), buf+off, sizeof(struct gpu_buffer));
 
 	if (!check_phy_consecutive((unsigned long)(kgpu_bufs[i].gb.addr),
-				   KGPU_BUF_SIZE, KGPU_BUF_FRAME_SIZE)) {
+				   kgpu_bufs[i].gb.size, KGPU_BUF_FRAME_SIZE)) {
 	    printk("[kgpu] Error: GPU buffer %p is not physically consecutive\n",
 		kgpu_bufs[i].gb.addr);
 	    return -EFAULT;
 	}
 
+	nframes = kgpu_bufs[i].gb.size/KGPU_BUF_FRAME_SIZE;
+
 	off += sizeof(struct gpu_buffer);
 	if (!kgpu_bufs[i].paddrs)
-	    kgpu_bufs[i].paddrs = kmalloc(sizeof(void*)*KGPU_BUF_FRAME_NR, GFP_KERNEL);
+	    kgpu_bufs[i].paddrs = kmalloc(
+		sizeof(void*)*nframes, GFP_KERNEL);
 	
-	for (j=0; j<KGPU_BUF_FRAME_NR; j++) {
+	for (j=0; j<nframes; j++) {
 	    kgpu_bufs[i].paddrs[j] =
 		(void*)kgpu_virt2phy((unsigned long)(kgpu_bufs[i].gb.addr)
 				     +j*KGPU_BUF_FRAME_SIZE); 
 	}
 	
-	kgpu_buf_uses[i] = 0;
+	kgpu_buf_bitmaps[i] = kmalloc(nframes/(KGPU_BUF_NR_FRAMES_IN_UNIT)/8,
+				      GFP_KERNEL);
+	bitmap_zero(kgpu_buf_bitmaps[i], nframes/KGPU_BUF_NR_FRAMES_IN_UNIT);
 
 	/*dbg("[kgpu] DEBUG: %p %p\n",
 	    kgpu_bufs[i].gb.addr, kgpu_bufs[i].paddrs[0]);*/

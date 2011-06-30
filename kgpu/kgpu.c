@@ -42,9 +42,7 @@
 struct kgpu_dev {
     struct cdev cdev;
 
-    struct kgpu_buffer bufs[KGPU_BUF_NR];
-    unsigned long *buf_bitmaps[KGPU_BUF_NR];
-    /* int buf_uses[KGPU_BUF_NR]; */
+    struct kgpu_mgmt_buffer mgmt_bufs[KGPU_BUF_NR];
     spinlock_t buflock;
 
     int rid_sequence;
@@ -62,8 +60,7 @@ struct kgpu_dev {
 
 static atomic_t kgpudev_av = ATOMIC_INIT(1);
 
-static struct kgpu_buffer kgpu_bufs[KGPU_BUF_NR];
-static unsigned long *kgpu_buf_bitmaps[KGPU_BUF_NR];
+static struct kgpu_mgmt_buffer kgpu_bufs[KGPU_BUF_NR];
 /* static int kgpu_buf_uses[KGPU_BUF_NR]; */
 static spinlock_t buflock;
 
@@ -92,6 +89,7 @@ struct sync_call_data {
 
 static struct kmem_cache *kgpu_req_cache;
 static struct kmem_cache *kgpu_resp_cache;
+static struct kmem_cache *kgpu_allocated_buf_cache;
 
 static int bad_address(void *p)
 {
@@ -300,16 +298,37 @@ void free_kgpu_response(struct kgpu_resp* resp)
 }
 EXPORT_SYMBOL_GPL(free_kgpu_response);
 
+static void kgpu_allocated_buf_constructor(void *data)
+{
+    struct kgpu_allocated_buffer *buf = (struct kgpu_allocated_buffer*)data;
+    memset(buf, 0, sizeof(struct kgpu_allocated_buffer);
+}
+
 struct kgpu_buffer* alloc_gpu_buffer(unsigned long nbytes)
 {
     int i;
+    unsigned int req_nunits;
+    struct kgpu_allocated_buffer *abuf;
+
+    req_nunits = DIV_ROUND_UP(nbytes, KGPU_BUF_UNIT_SIZE);
+    
     spin_lock(&buflock);
 
     for (i=0; i<KGPU_BUF_NR; i++) {
-	if (!kgpu_buf_uses[i]) {
-	    kgpu_buf_uses[i] = 1;
+	unsigned long idx = bitmap_find_next_zero_area(
+	    kgpu_mgmt_bufs[i].bitmap, kgpu_mgmt_bufs[i].nunits,
+	    0, req_nunits, 0);
+	if (idx < kgpu_mgmt_bufs[i].nunits) {
+	    bitmap_set(kgpu_mgmt_bufs[i].bitmap, idx, req_nunits);
 	    spin_unlock(&buflock);
-	    return &(kgpu_bufs[i]);
+
+	    abuf = kmem_cache_alloc(kgpu_allocated_buf_cache, GFP_KERNEL);
+	    abuf.mgmt_buf_idx = i;
+	    abuf.buf.npages = req_nunits*KGPU_NR_FRAMES_IN_UNIT;
+	    abuf.pas = kgpu_mgmt_bufs[i].paddrs+(idx*KGPU_NR_FRAMES_IN_UNIT);
+	    abuf.va = kgpu_mgmt_bufs[i].gb.addr+(idx*KGPU_UNIT_SIZE);
+	    
+	    return &(abuf.buf);
 	}
     }
 
@@ -325,7 +344,7 @@ int free_gpu_buffer(struct kgpu_buffer *buf)
     spin_lock(&buflock);
 
     for (i=0; i<KGPU_BUF_NR; i++) {
-	if (buf->gb.addr == kgpu_bufs[i].gb.addr) {
+	if (buf->gb.addr == kgpu_mgmt_bufs[i].gb.addr) {
 	    kgpu_buf_uses[i] = 0;
 	    spin_unlock(&buflock);
 	    return 0;
@@ -570,34 +589,34 @@ static int set_gpu_bufs(char __user *buf)
     spin_lock(&buflock);
 
     for (i=0; i<KGPU_BUF_NR; i++) {
-	copy_from_user(&(kgpu_bufs[i].gb), buf+off, sizeof(struct gpu_buffer));
+	copy_from_user(&(kgpu_mgmt_bufs[i].gb), buf+off, sizeof(struct gpu_buffer));
 
-	if (!check_phy_consecutive((unsigned long)(kgpu_bufs[i].gb.addr),
-				   kgpu_bufs[i].gb.size, KGPU_BUF_FRAME_SIZE)) {
+	if (!check_phy_consecutive((unsigned long)(kgpu_mgmt_bufs[i].gb.addr),
+				   kgpu_mgmt_bufs[i].gb.size, KGPU_BUF_FRAME_SIZE)) {
 	    printk("[kgpu] Error: GPU buffer %p is not physically consecutive\n",
-		kgpu_bufs[i].gb.addr);
+		kgpu_mgmt_bufs[i].gb.addr);
 	    return -EFAULT;
 	}
 
-	nframes = kgpu_bufs[i].gb.size/KGPU_BUF_FRAME_SIZE;
+	nframes = kgpu_mgmt_bufs[i].gb.size/KGPU_BUF_FRAME_SIZE;
 
 	off += sizeof(struct gpu_buffer);
-	if (!kgpu_bufs[i].paddrs)
-	    kgpu_bufs[i].paddrs = kmalloc(
-		sizeof(void*)*nframes, GFP_KERNEL);
+	if (!kgpu_mgmt_bufs[i].paddrs)
+	    kgpu_mgmt_bufs[i].paddrs = kmalloc(sizeof(void*)*nframes, GFP_KERNEL);
 	
 	for (j=0; j<nframes; j++) {
-	    kgpu_bufs[i].paddrs[j] =
-		(void*)kgpu_virt2phy((unsigned long)(kgpu_bufs[i].gb.addr)
+	    kgpu_mgmt_bufs[i].paddrs[j] =
+		(void*)kgpu_virt2phy((unsigned long)(kgpu_mgmt_bufs[i].gb.addr)
 				     +j*KGPU_BUF_FRAME_SIZE); 
 	}
-	
-	kgpu_buf_bitmaps[i] = kmalloc(nframes/(KGPU_BUF_NR_FRAMES_IN_UNIT)/8,
-				      GFP_KERNEL);
-	bitmap_zero(kgpu_buf_bitmaps[i], nframes/KGPU_BUF_NR_FRAMES_IN_UNIT);
+
+	kgpu_mgmt_bufs[i].bitmap = kmalloc(
+	    BITS_TO_LONGS(nframes/KGPU_BUF_NR_FRAMES_IN_UNIT)*sizeof(long),
+	    GFP_KERNEL);
+	bitmap_zero(kgpu_mgmt_bufs[i].bitmap, nframes/KGPU_BUF_NR_FRAMES_IN_UNIT);
 
 	/*dbg("[kgpu] DEBUG: %p %p\n",
-	    kgpu_bufs[i].gb.addr, kgpu_bufs[i].paddrs[0]);*/
+	    kgpu_mgmt_bufs[i].gb.addr, kgpu_mgmt_bufs[i].paddrs[0]);*/
     }
 
     spin_unlock(&buflock);
@@ -607,7 +626,7 @@ static int set_gpu_bufs(char __user *buf)
 
 static int dump_gpu_bufs(char __user *buf)
 {
-    /* TODO dump kgpu_bufs' gb's to buf */
+    /* TODO dump kgpu_mgmt_bufs' gb's to buf */
     return 0;
 }
 
@@ -682,6 +701,7 @@ int kgpu_init(void)
     int result;
     dev_t dev = 0;
     int devno;
+    int i;
     
     INIT_LIST_HEAD(&reqs);
     INIT_LIST_HEAD(&resps);
@@ -712,6 +732,19 @@ int kgpu_init(void)
 	return -EFAULT;
     }
 
+    kgpu_allocated_buf_cache = kmem_cache_create(
+	"kgpu_allocated_buf_cache", sizeof(struct kgpu_allocated_buffer), 0,
+	SLAB_HWCACHE_ALIGN, kgpu_allocated_buf_constructor);
+    if (!kgpu_allocated_buf_cache) {
+	printk("[kgpu] Error: can't create allocated buffer cache\n");
+	kmem_cache_destroy(kgpu_allocated_buf_cache);
+	return -EFAULT;
+    }
+
+    /* initialize buffer info */
+    memset(kgpu_mgmt_bufs, 0, sizeof(struct kgpu_mgmt_buffer)*KGPU_BUF_NR);
+
+    /* alloc dev */	
     result = alloc_chrdev_region(&dev, 0, 1, KGPU_DEV_NAME);
     kgpu_major = MAJOR(dev);
 
@@ -744,6 +777,16 @@ void kgpu_cleanup(void)
 	kmem_cache_destroy(kgpu_req_cache);
     if (kgpu_resp_cache)
 	kmem_cache_destroy(kgpu_resp_cache);
+
+    if (kgpu_allocated_buf_cache)
+	kmem_cache_destroy(kgpu_allocated_buf_cache);
+
+    /* clean up buffer info */
+    for (i=0; i<KGPU_BUF_NR; i++) {
+	kfree(kgpu_mgmt_bufs[i].bitmap);
+	kfree(kgpu_mgmt_bufs[i].paddrs);
+    }
+    memset(kgpu_mgmt_bufs, 0, sizeof(struct kgpu_mgmt_buffer)*KGPU_BUF_NR);
 }
 EXPORT_SYMBOL_GPL(kgpu_cleanup);
 

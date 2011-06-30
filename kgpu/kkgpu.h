@@ -23,10 +23,23 @@
 #define KGPU_BUF_UNIT_SIZE (128*1024)
 #define KGPU_BUF_NR_FRAMES_IN_UNIT (KGPU_BUF_UNIT_SIZE/KGPU_BUF_FRAME_SIZE)
 
-struct kgpu_buffer {
+struct kgpu_mgmt_buffer {
     struct gpu_buffer gb;
     void **paddrs;
     unsigned int npages;
+    unsigned int nunits;
+    unsigned long *bitmap;
+};
+
+struct kgpu_buffer {
+    void *va;
+    void **pas;
+    unsigned int npages;
+}
+
+struct kgpu_allocated_buffer {
+    struct kgpu_buffer buf;
+    int mgmt_buf_idx;
 };
 
 struct kgpu_req;

@@ -5,6 +5,8 @@
  * Copyright (c) 2010-2011 University of Utah and the Flux Group.
  * All rights reserved.
  *
+ * Userspace helper program.
+ *
  */
 
 #include <stdio.h>
@@ -57,24 +59,18 @@ int _safe_syscall(int r, const char *file, int line)
     return r;
 }
 
-#ifndef _NDEBUG
-#define dbg(...) fprintf(stderr, __VA_ARGS__)
-#else
-#define dbg(...)
-#endif
-
 typedef unsigned char u8;
 
 static void dump_hex(u8* p, int rs, int cs)
 {
-        int r,c;
-        printf("\n");
-        for (r=0; r<rs; r++) {
-                for (c=0; c<cs; c++) {
-                        printf("%02x ", p[r*cs+c]);
-                }
-        	printf("\n");
-        }
+    int r,c;
+    printf("\n");
+    for (r=0; r<rs; r++) {
+	for (c=0; c<cs; c++) {
+	    printf("%02x ", p[r*cs+c]);
+	}
+	printf("\n");
+    }
 }
 
 int init_kgpu(void)
@@ -90,7 +86,8 @@ int init_kgpu(void)
     /* alloc GPU Pinned memory buffers */
     for (i=0; i<KGPU_BUF_NR; i++) {
 	gbufs[i].addr = (void*)alloc_pinned_mem(KGPU_BUF_SIZE);
-	/*dbg("%p \n", gbufs[i].addr);*/
+	gbugs[i].size = KGPU_BUF_SIZE;
+	dbg("%p \n", gbufs[i].addr);
 	memset(gbufs[i].addr, 0, KGPU_BUF_SIZE);
 	ssc( mlock(gbufs[i].addr, KGPU_BUF_SIZE));
     }
@@ -160,7 +157,7 @@ int get_next_service_request()
 
     struct sritem *sreq;
 
-    /*dbg("read is %s\n", list_empty(&all_reqs)?"blocking":"non-blocking");*/
+    dbg("read is %s\n", list_empty(&all_reqs)?"blocking":"non-blocking");
 
     pfd.fd = devfd;
     pfd.events = POLLIN;
@@ -187,9 +184,9 @@ int get_next_service_request()
 	    }
 	} else {
 	
-	    /*dbg("request %d %s %p %p %d\n", sreq->sr.kureq.id, sreq->sr.kureq.sname,
-		sreq->sr.kureq.input, sreq->sr.kureq.output, (int)(sreq->sr.kureq.insize));
-	    */
+	    dbg("request %d %s %p %p %d\n", sreq->sr.kureq.id, sreq->sr.kureq.sname,
+		sreq->sr.kureq.input, sreq->sr.kureq.output,
+		(int)(sreq->sr.kureq.insize));
 	    list_add_tail(&sreq->glist, &all_reqs);
 	    sreq->sr.stream_id = -1;
 	
@@ -333,10 +330,7 @@ int main_loop()
 	__process_request(launch_exec, &prepared_reqs, 1);
 	__process_request(prepare_exec, &memdone_reqs, 1);
 	__process_request(service_request_alloc_mem, &init_reqs, 0);
-	get_next_service_request();
-	
-	/*dbg("one loop\n");*/
-	
+	get_next_service_request();	
     }
 
     return 0;
@@ -348,7 +342,7 @@ int main(int argc, char *argv[])
     kgpudev = "/dev/kgpu";
     service_lib_dir = "./";
 
-    while ((c = getopt(argc, argv, "d:l:")) != -1)
+    while ((c = getopt(argc, argv, "d:l:v:")) != -1)
     {
 	switch (c)
 	{
@@ -358,9 +352,17 @@ int main(int argc, char *argv[])
 	case 'l':
 	    service_lib_dir = optarg;
 	    break;
+	case 'v':
+	    kgpu_log_level = atoi(optarg);
+	    break;
 	default:
-	    fprintf(stderr, "Usage %s [-d device] [-l service_lib_dir]\n",
-		argv[0]);
+	    fprintf(stderr,
+		    "Usage %s"
+		    " [-d device]"
+		    " [-l service_lib_dir]"
+		    " [-v log_level"
+		    "\n",
+		    argv[0]);
 	    return 0;
 	}
     }

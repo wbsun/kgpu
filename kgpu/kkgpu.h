@@ -5,23 +5,22 @@
  * Copyright (c) 2010-2011 University of Utah and the Flux Group.
  * All rights reserved.
  *
+ * Internal header used by KGPU only
+ *
  */
 
-#ifndef ___KGPU_H__
-#define ___KGPU_H__
+#ifndef ___KKGPU_H__
+#define ___KKGPU_H__
+
 #include "kgpu.h"
+#include <linux/types.h>
 
-#ifndef _NDEBUG
-#define dbg(...) printk(__VA_ARGS__)
-#else
-#define dbg(...)
-#endif
-
-#define KGPU_BUF_FRAME_SIZE (4*1024)
-#define KGPU_BUF_FRAME_NR (KGPU_BUF_SIZE/KGPU_BUF_FRAME_SIZE)
-
+/*
+ * Buffer management stuff, put them here in case we may
+ * create a kgpu_buf.c for buffer related functions.
+ */
 #define KGPU_BUF_UNIT_SIZE (128*1024)
-#define KGPU_BUF_NR_FRAMES_IN_UNIT (KGPU_BUF_UNIT_SIZE/KGPU_BUF_FRAME_SIZE)
+#define KGPU_BUF_NR_FRAMES_PER_UNIT (KGPU_BUF_UNIT_SIZE/PAGE_SIZE)
 
 struct kgpu_mgmt_buffer {
     struct gpu_buffer gb;
@@ -31,45 +30,16 @@ struct kgpu_mgmt_buffer {
     unsigned long *bitmap;
 };
 
-struct kgpu_buffer {
-    void *va;
-    void **pas;
-    unsigned int npages;
-}
-
 struct kgpu_allocated_buffer {
     struct kgpu_buffer buf;
     int mgmt_buf_idx;
 };
 
-struct kgpu_req;
-struct kgpu_resp;
-
-typedef int (*ku_callback)(struct kgpu_req *req,
-			   struct kgpu_resp *resp);
-
-struct kgpu_req {
-    struct list_head list;
-    struct ku_request kureq;
-    struct kgpu_resp *resp;
-    ku_callback cb;
-    void *data;
-};
-
-struct kgpu_resp {
-    struct list_head list;
-    struct ku_response kuresp;
-    struct kgpu_req *req;
-};
-
-extern int call_gpu(struct kgpu_req*, struct kgpu_resp*);
-extern int call_gpu_sync(struct kgpu_req*, struct kgpu_resp*);
-extern int next_kgpu_request_id(void);
-extern struct kgpu_req* alloc_kgpu_request(void);
-extern struct kgpu_resp* alloc_kgpu_response(void);
-extern struct kgpu_buffer* alloc_gpu_buffer(unsigned long nbytes);
-extern int free_gpu_buffer(struct kgpu_buffer *);
-extern void free_kgpu_response(struct kgpu_resp*);
-extern void free_kgpu_request(struct kgpu_req*);
+/* memory ops */
+extern unsigned long kgpu_virt2phy(unsigned long vaddr);
+extern int
+kgpu_check_phy_consecutiveness(unsigned long vaddr, size_t sz, size_t framesz);
+extern void kgpu_dump_pages(unsigned long vaddr, unsigned long sz);
+extern void kgpu_test_memory_pages(unsigned long vaddr, unsigned long sz);
 
 #endif

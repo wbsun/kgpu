@@ -12,7 +12,6 @@
 
 #include <linux/module.h>
 #include <linux/init.h>
-#include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <linux/spinlock.h>
@@ -20,20 +19,14 @@
 #include <linux/kthread.h>
 #include <linux/proc_fs.h>
 #include <linux/mm.h>
-#include <linux/mm_types.h>
 #include <linux/string.h>
 #include <linux/uaccess.h>
-#include <linux/compiler.h>
 #include <linux/wait.h>
 #include <linux/cdev.h>
 #include <linux/fs.h>
 #include <linux/poll.h>
 #include <linux/slab.h>
 #include <linux/bitmap.h>
-#include <asm/page.h>
-#include <asm/page_types.h>
-#include <asm/pgtable.h>
-#include <asm/pgtable_types.h>
 #include <asm/atomic.h>
 #include "kkgpu.h"
 
@@ -59,25 +52,7 @@ struct kgpu_dev {
 };
 
 static atomic_t kgpudev_av = ATOMIC_INIT(1);
-
-static struct kgpu_mgmt_buffer kgpu_bufs[KGPU_BUF_NR];
-/* static int kgpu_buf_uses[KGPU_BUF_NR]; */
-static spinlock_t buflock;
-
-static int kgpu_rid_cnt = 0;
-static spinlock_t ridlock;
-
-static struct list_head reqs;
-static struct list_head resps;
-static spinlock_t reqlock;
-static spinlock_t resplock;
-static wait_queue_head_t reqq;
-
-static struct list_head rtdreqs;
-static spinlock_t rtdreqlock;
-
-static struct cdev kgpudev;
-
+static struct kgpu_dev kgpudev;
 static int kgpu_major;
 
 struct sync_call_data {
@@ -91,95 +66,20 @@ static struct kmem_cache *kgpu_req_cache;
 static struct kmem_cache *kgpu_resp_cache;
 static struct kmem_cache *kgpu_allocated_buf_cache;
 
-static int bad_address(void *p)
-{
-    unsigned long dummy;
-    return probe_kernel_address((unsigned long*)p, dummy);
-}
-
-/*
- * map any virtual address of the current process to its
- * physical one.
- */
-static unsigned long kgpu_virt2phy(unsigned long vaddr)
-{
-    pgd_t *pgd = pgd_offset(current->mm, vaddr);
-    pud_t *pud;
-    pmd_t *pmd;
-    pte_t *pte;
-
-    /* to lock the page */
-    struct page *pg;
-    unsigned long paddr = 0;
-
-    if (bad_address(pgd)) {
-	printk(KERN_ALERT "[kgpu] Alert: bad address of pgd %p\n", pgd);
-	goto bad;
-    }
-    if (pgd_none(*pgd) || pgd_bad(*pgd)) {
-	printk(KERN_ALERT "[kgpu] Alert: pgd not present %lu\n", pgd_val(*pgd));
-	goto out;
-    }
-
-    pud = pud_offset(pgd, vaddr);
-    if (bad_address(pud)) {
-	printk(KERN_ALERT "[kgpu] Alert: bad address of pud %p\n", pud);
-	goto bad;
-    }
-    if (pud_none(*pud) || pud_bad(*pud)) {
-	printk(KERN_ALERT "[kgpu] Alert: pud not present %lu\n", pud_val(*pud));
-	goto out;
-    }
-
-    pmd = pmd_offset(pud, vaddr);
-    if (bad_address(pmd)) {
-	printk(KERN_ALERT "[kgpu] Alert: bad address of pmd %p\n", pmd);
-	goto bad;
-    }
-    if (pmd_none(*pmd) || pmd_bad(*pmd)) {
-	printk(KERN_ALERT "[kgpu] Alert: pmd not present %lu\n", pmd_val(*pmd));
-	goto out;
-    }
-
-    pte = pte_offset_map/*kernel*/(pmd, vaddr);
-    if (bad_address(pte)) {
-	printk(KERN_ALERT "[kgpu] Alert: bad address of pte %p\n", pte);
-	goto bad;
-    }    
-    if (!pte_present(*pte)) {
-	printk(KERN_ALERT "[kgpu] Alert: pte not present %lu\n", pte_val(*pte));
-	goto out;
-    }
-
-    pg = pte_page(*pte);
-    paddr = (pte_val(*pte) & PHYSICAL_PAGE_MASK) | (vaddr&(PAGE_SIZE-1));
-
-out:
-    return paddr;
-bad:
-    printk(KERN_ALERT "[kgpu] Alert: Bad address\n");
-    return 0;
-}
-
 int call_gpu(struct kgpu_req *req, struct kgpu_resp *resp)
 {
-    int dowake = 0;
     req->resp = resp;
     
-    spin_lock(&reqlock);
-
-    if (list_empty(&reqs))
-	dowake = 1;
+    spin_lock(&(kgpudev.reqlock));
 
     INIT_LIST_HEAD(&req->list);
-    list_add_tail(&req->list, &reqs);
-
-    /*if (dowake)*/
-	wake_up_interruptible(&reqq);
+    list_add_tail(&req->list, &(kgpudev.reqs));
     
-    spin_unlock(&reqlock);
+    wake_up_interruptible(&(kgpudev.reqq));
+    
+    spin_unlock(&(kgpudev.reqlock));
 
-    /*dbg("[kgpu] DEBUG: call gpu %d\n", req->kureq.id);*/
+    kgpu_log(KGPU_LOG_INFO, "call gpu %d\n", req->kureq.id);
     
     return 0;
 }
@@ -187,23 +87,23 @@ EXPORT_SYMBOL_GPL(call_gpu);
 
 static int sync_callback(struct kgpu_req *req, struct kgpu_resp *resp)
 {
-	struct sync_call_data *data = (struct sync_call_data*)
-		req->data;
-	
-	data->done = 1;
-		
-	wake_up_interruptible(&data->queue);
-	
-	return 0;
+    struct sync_call_data *data = (struct sync_call_data*)
+	req->data;
+    
+    data->done = 1;
+    
+    wake_up_interruptible(&data->queue);
+    
+    return 0;
 }
 
 int call_gpu_sync(struct kgpu_req *req, struct kgpu_resp *resp)
 {
-    struct sync_call_data *data = kmalloc(
-	sizeof(struct sync_call_data), GFP_KERNEL);
+    struct sync_call_data *data
+	= kmalloc(sizeof(struct sync_call_data), GFP_KERNEL);
     if (!data) {
-	    printk("[kgpu] Error: call_gpu_sync alloc mem failed\n");
-	    return 1;
+	kgpu_log(KGPU_LOG_ERROR, "call_gpu_sync alloc mem failed\n");
+	return 1;
     }
     
     req->resp = resp;
@@ -216,18 +116,18 @@ int call_gpu_sync(struct kgpu_req *req, struct kgpu_resp *resp)
     req->data = data;
     req->cb = sync_callback;
     
-    spin_lock(&reqlock);
+    spin_lock(&(kgpudev.reqlock));
 
     INIT_LIST_HEAD(&req->list);
-    list_add_tail(&req->list, &reqs);
+    list_add_tail(&req->list, &(kgpudev.reqs));
 
-    wake_up_interruptible(&reqq);
+    wake_up_interruptible(&(kgpudev.reqq));
     
-    spin_unlock(&reqlock);
+    spin_unlock(&(kgpudev.reqlock));
 
-    /*dbg("[kgpu] DEBUG: call gpu sync before %d\n", req->kureq.id);*/
+    dbg("call gpu sync before %d\n", req->kureq.id);
     wait_event_interruptible(data->queue, (data->done==1));
-    /*dbg("[kgpu] DEBUG: call gpu sync done %d\n", req->kureq.id);*/
+    dbg("call gpu sync done %d\n", req->kureq.id);
     
     req->data = data->olddata;
     req->cb = data->oldcb;
@@ -241,14 +141,14 @@ int next_kgpu_request_id(void)
 {
     int rt = -1;
     
-    spin_lock(&ridlock);
+    spin_lock(&(kgpudev.ridlock));
     
-    kgpu_rid_cnt++;
-    if (kgpu_rid_cnt < 0)
-	kgpu_rid_cnt = 0;
-    rt = kgpu_rid_cnt;
+    kgpudev.rid_sequence++;
+    if (kgpudev.rid_sequence < 0)
+	kgpudev.rid_sequence = 0;
+    rt = kgpudev.rid_sequence;
     
-    spin_unlock(&ridlock);
+    spin_unlock(&(kgpudev.ridlock));
     return rt;
 }
 EXPORT_SYMBOL_GPL(next_kgpu_request_id);
@@ -312,46 +212,48 @@ struct kgpu_buffer* alloc_gpu_buffer(unsigned long nbytes)
 
     req_nunits = DIV_ROUND_UP(nbytes, KGPU_BUF_UNIT_SIZE);
     
-    spin_lock(&buflock);
+    spin_lock(&(kgpudev.buflock));
 
     for (i=0; i<KGPU_BUF_NR; i++) {
 	unsigned long idx = bitmap_find_next_zero_area(
-	    kgpu_mgmt_bufs[i].bitmap, kgpu_mgmt_bufs[i].nunits,
+	    kgpudev.mgmt_bufs[i].bitmap, kgpudev.mgmt_bufs[i].nunits,
 	    0, req_nunits, 0);
-	if (idx < kgpu_mgmt_bufs[i].nunits) {
-	    bitmap_set(kgpu_mgmt_bufs[i].bitmap, idx, req_nunits);
-	    spin_unlock(&buflock);
+	if (idx < kgpudev.mgmt_bufs[i].nunits) {
+	    bitmap_set(kgpudev.mgmt_bufs[i].bitmap, idx, req_nunits);
+	    spin_unlock(&(kgpudev.buflock));
 
 	    abuf = kmem_cache_alloc(kgpu_allocated_buf_cache, GFP_KERNEL);
-	    abuf.mgmt_buf_idx = i;
-	    abuf.buf.npages = req_nunits*KGPU_NR_FRAMES_IN_UNIT;
-	    abuf.pas = kgpu_mgmt_bufs[i].paddrs+(idx*KGPU_NR_FRAMES_IN_UNIT);
-	    abuf.va = kgpu_mgmt_bufs[i].gb.addr+(idx*KGPU_UNIT_SIZE);
+	    abuf->mgmt_buf_idx = i;
+	    abuf->buf.npages = req_nunits*KGPU_BUF_NR_FRAMES_PER_UNIT;
+	    abuf->pas = kgpudev.mgmt_bufs[i].paddrs+(idx*KGPU_BUF_NR_FRAMES_PER_UNIT);
+	    abuf->va = (unsigned long)(kgpudev.mgmt_bufs[i].gb.addr)
+		+(idx*KGPU_BUF_UNIT_SIZE);
 	    
-	    return &(abuf.buf);
+	    return &(abuf->buf);
 	}
     }
 
-    spin_unlock(&buflock);
+    spin_unlock(&(kgpudev.buflock));
     return NULL;
 }
 EXPORT_SYMBOL_GPL(alloc_gpu_buffer);
 
 int free_gpu_buffer(struct kgpu_buffer *buf)
 {
-    int i;
+    int nr, idx;
+    struct kgpu_allocated_buffer *abuf =
+	container_of(buf, struct kgpu_allocated_buffer, buf);
+    struct kgpu_mgmt_buffer *mbuf = kgpudev.mgmt_bufs[abuf->mgmt_buf_idx];
 
-    spin_lock(&buflock);
+    nr = buf->npages/KGPU_BUF_NR_FRAMES_PER_UNIT;
+    idx = ((unsigned long)(buf->va) - (unsigend long)(mbuf->gb.addr))
+	/KGPU_BUF_UNIT_SIZE;
 
-    for (i=0; i<KGPU_BUF_NR; i++) {
-	if (buf->gb.addr == kgpu_mgmt_bufs[i].gb.addr) {
-	    kgpu_buf_uses[i] = 0;
-	    spin_unlock(&buflock);
-	    return 0;
-	}
-    }
+    spin_lock(&(kgpudev.buflock));
 
-    spin_unlock(&buflock);
+    bitmap_clear(mbuf->bitmap, idx, nr);    
+
+    spin_unlock(&(kgpudev.buflock));
     return 1;
 }
 EXPORT_SYMBOL_GPL(free_gpu_buffer);
@@ -366,18 +268,18 @@ static struct kgpu_req* find_request(int id, int offlist)
 {
     struct kgpu_req *pos, *n;
 
-    spin_lock(&rtdreqlock);
+    spin_lock(&(kgpudev.rtdreqlock));
     
-    list_for_each_entry_safe(pos, n, &rtdreqs, list) {
+    list_for_each_entry_safe(pos, n, &(kgpudev.rtdreqs), list) {
 	if (pos->kureq.id == id) {
 	    if (offlist)
 		list_del(&pos->list);
-	    spin_unlock(&rtdreqlock);
+	    spin_unlock(&(kgpudev.rtdreqlock));
 	    return pos;
 	}
     }
 
-    spin_unlock(&rtdreqlock);
+    spin_unlock(&(kgpudev.rtdreqlock));
 
     return NULL;
 }
@@ -406,18 +308,18 @@ ssize_t kgpu_read(struct file *filp, char __user *buf, size_t c, loff_t *fpos)
     struct list_head *r;
     struct kgpu_req *req = NULL;
 
-    spin_lock(&reqlock);
-    while (list_empty(&reqs)) {
-	spin_unlock(&reqlock);
+    spin_lock(&(kgpudev.reqlock));
+    while (list_empty(&(kgpudev.reqs))) {
+	spin_unlock(&(kgpudev.reqlock));
 
 	if (filp->f_flags & O_NONBLOCK)
 	    return -EAGAIN;
 
-	/*dbg("[kgpu] DEBUG: blocking read %s\n", current->comm);*/
+	dbg("blocking read %s\n", current->comm);
 
-	if (wait_event_interruptible(reqq, (!list_empty(&reqs))))
+	if (wait_event_interruptible(kgpudev.reqq, (!list_empty(&(kgpudev.reqs)))))
 	    return -ERESTARTSYS;
-	spin_lock(&reqlock);
+	spin_lock(&(kgpudev.reqlock));
     }
 
     r = reqs.next;
@@ -427,23 +329,23 @@ ssize_t kgpu_read(struct file *filp, char __user *buf, size_t c, loff_t *fpos)
 	memcpy/*copy_to_user*/(buf, &req->kureq, sizeof(struct ku_request));
 	ret = c;/*sizeof(struct ku_request);*/
 
-	/*dbg("[kgpu] DEBUG: one request read %s %d %ld\n",
-	    req->kureq.sname, req->kureq.id, ret);*/
+	dbg("one request read %s %d %ld\n",
+	    req->kureq.sname, req->kureq.id, ret);
     }
 
-    spin_unlock(&reqlock);
+    spin_unlock(&(kgpudev.reqlock));
 
     if (ret > 0 && req) {
-	spin_lock(&rtdreqlock);
+	spin_lock(&(kgpudev.rtdreqlock));
 
 	INIT_LIST_HEAD(&req->list);
-	list_add_tail(&req->list, &rtdreqs);
+	list_add_tail(&req->list, &(kgpudev.rtdreqs));
 
-	spin_unlock(&rtdreqlock);
+	spin_unlock(&(kgpudev.rtdreqlock));
     }
     
-    /*dbg("[kgpu] DEBUG: %s read %lu return %ld\n",
-	current->comm, c, ret);*/
+    dbg("%s read %lu return %ld\n",
+	current->comm, c, ret);
 
     *fpos += ret;
 
@@ -466,12 +368,12 @@ ssize_t kgpu_write(struct file *filp, const char __user *buf,
 
 	memcpy/*copy_from_user*/(&kuresp, buf, realcount);
 
-	/*dbg("[kgpu] DEBUG: response ID: %d\n", kuresp.id);*/
+	dbg("response ID: %d\n", kuresp.id);
 
 	req = find_request(kuresp.id, 1);
 	if (!req)
 	{	    
-	    dbg("[kgpu] DEBUG: no request found for %d\n", kuresp.id);
+	    dbg("no request found for %d\n", kuresp.id);
 	    ret = -EFAULT; /* no request found */
 	} else {
 	    memcpy(&(req->resp->kuresp), &kuresp, realcount);
@@ -493,140 +395,58 @@ ssize_t kgpu_write(struct file *filp, const char __user *buf,
 	}
     }
 
-    /*dbg("[kgpu] DEBUG: %s write %lu return %ld\n",
-	current->comm, count, ret);*/
+    dbg("%s write %lu return %ld\n",
+	current->comm, count, ret);
 
     return ret;
-}
-
-static int check_phy_consecutive(unsigned long vaddr, size_t sz, size_t framesz)
-{
-    unsigned long paddr, lpa;
-    size_t offset = 0;
-
-    if (framesz == PAGE_SIZE)
-	return 1;
-
-    do {
-	paddr = kgpu_virt2phy(vaddr+offset);
-	lpa = kgpu_virt2phy(vaddr+offset-PAGE_SIZE+framesz);
-	if (!lpa || !paddr) {
-	    printk("[kgpu] Error: PA for 0x%lx or 0x%lx not found\n",
-		   (vaddr+offset), (vaddr+offset-PAGE_SIZE+framesz));
-	    return 0;
-	}
-	
-	if (lpa != paddr+framesz-PAGE_SIZE) {
-	    printk("[kgpu] Error: VA from 0x%lx to 0x%lx not consecutive\n",
-		   (vaddr+offset), (vaddr+offset-PAGE_SIZE+framesz));
-	    return 0;
-	}
-	
-	offset += framesz;
-    } while (offset < sz);
-
-    return 1;    
-}
-
-
-static void dump_pages(unsigned long vaddr, unsigned long sz)
-{
-    void* page;
-    unsigned long offset=0;
-    sz -= PAGE_SIZE;
-
-    do {
-	page = virt_to_page(vaddr+offset);
-	dbg("[kgpu] DEBUG: %s %s %p @ page %p (%p)\n",
-	    (virt_addr_valid(vaddr+offset)?"valid va":"invalid va"),
-	    (virt_addr_valid(page)?"valid page":"invalid page"),
-	    (void*)(vaddr+offset), page, (void*)__pa(page));
-	offset += PAGE_SIZE;
-    } while (offset < sz-1);
-}
-
-
-static void test_pages(unsigned long vaddr, unsigned long sz)
-{
-    int npages = sz/PAGE_SIZE;
-
-    struct page **pages = kmalloc(npages*sizeof(struct page*), GFP_KERNEL);
-
-    int rt;
-    struct vm_area_struct *vma;
-
-    down_read(&current->mm->mmap_sem);
-    rt = get_user_pages(current, current->mm, vaddr, npages,
-			    0, 0, pages, NULL);
-    up_read(&current->mm->mmap_sem);
-
-    vma = find_vma(current->mm, vaddr);
-    if (!vma) {
-	dbg("[kgpu] DEBUG: no VMA for %p\n", (void*)vaddr);
-    } else {
-	dbg("[kgpu] DEBUG: VMA(0x%lx ~ 0x%lx) flags for %p is 0x%lx\n",
-	    vma->vm_start, vma->vm_end,
-	    (void*)vaddr, vma->vm_flags);
-    }
-    
-    if (rt<=0) {
-	dbg("[kgpu] DEBUG: no page pinned %d\n", rt);
-    } else {
-	dbg("[kgpu] DEBUG: get pages\n");
-	for (npages=0; npages<rt; npages++) {
-	    put_page(pages[npages]);
-	}
-    }
-
-    kfree(pages);
-    
 }
 
 static int set_gpu_bufs(char __user *buf)
 {
     int off=0, i, j, nframes;
     
-    spin_lock(&buflock);
+    spin_lock(&(kgpudev.buflock));
 
     for (i=0; i<KGPU_BUF_NR; i++) {
-	copy_from_user(&(kgpu_mgmt_bufs[i].gb), buf+off, sizeof(struct gpu_buffer));
+	struct kgpu_mgmt_buffer *mbuf = &(kgpudev.mgmt_bufs[i]);
+	copy_from_user(&mbuf->gb, buf+off, sizeof(struct gpu_buffer));
 
-	if (!check_phy_consecutive((unsigned long)(kgpu_mgmt_bufs[i].gb.addr),
-				   kgpu_mgmt_bufs[i].gb.size, KGPU_BUF_FRAME_SIZE)) {
-	    printk("[kgpu] Error: GPU buffer %p is not physically consecutive\n",
-		kgpu_mgmt_bufs[i].gb.addr);
+#ifdef 0
+	if (!kgpu_check_phy_consecutive((unsigned long)(mbuf->gb.addr),
+				   mbuf->gb.size, PAGE_SIZE)) {
+	    kgpu_log(KGPU_LOG_ERROR, "GPU buffer %p is not physically consecutive\n",
+		mbuf->gb.addr);
 	    return -EFAULT;
 	}
+#endif
 
-	nframes = kgpu_mgmt_bufs[i].gb.size/KGPU_BUF_FRAME_SIZE;
+	mbuf->npages = mbuf->gb.size/PAGE_SIZE;
 
 	off += sizeof(struct gpu_buffer);
-	if (!kgpu_mgmt_bufs[i].paddrs)
-	    kgpu_mgmt_bufs[i].paddrs = kmalloc(sizeof(void*)*nframes, GFP_KERNEL);
+	if (!mbuf->paddrs)
+	    mbuf->paddrs = kmalloc(sizeof(void*)*mbuf->npages, GFP_KERNEL);
 	
-	for (j=0; j<nframes; j++) {
-	    kgpu_mgmt_bufs[i].paddrs[j] =
-		(void*)kgpu_virt2phy((unsigned long)(kgpu_mgmt_bufs[i].gb.addr)
-				     +j*KGPU_BUF_FRAME_SIZE); 
+	for (j=0; j<mbuf->npages; j++) {
+	    mbuf->paddrs[j] =
+		(void*)kgpu_virt2phy((unsigned long)(mbuf->gb.addr)
+				     +j*PAGE_SIZE); 
 	}
 
-	kgpu_mgmt_bufs[i].bitmap = kmalloc(
-	    BITS_TO_LONGS(nframes/KGPU_BUF_NR_FRAMES_IN_UNIT)*sizeof(long),
-	    GFP_KERNEL);
-	bitmap_zero(kgpu_mgmt_bufs[i].bitmap, nframes/KGPU_BUF_NR_FRAMES_IN_UNIT);
+	mbuf->nunits = mbuf->npages/KGPU_BUF_NR_FRAMES_PER_UNIT;
+	mbuf->bitmap = kmalloc(BITS_TO_LONGS(mbuf->nunits)*sizeof(long), GFP_KERNEL);
+	bitmap_zero(mbuf->bitmap, mbuf->nunits);
 
-	/*dbg("[kgpu] DEBUG: %p %p\n",
-	    kgpu_mgmt_bufs[i].gb.addr, kgpu_mgmt_bufs[i].paddrs[0]);*/
+	dbg("%p %p\n", mbuf->gb.addr, mbuf->paddrs[0]);
     }
 
-    spin_unlock(&buflock);
+    spin_unlock(&(kgpudev.buflock));
    
     return 0;
 }
 
 static int dump_gpu_bufs(char __user *buf)
 {
-    /* TODO dump kgpu_mgmt_bufs' gb's to buf */
+    /* TODO dump kgpudev.mgmt_bufs' gb's to buf */
     return 0;
 }
 
@@ -672,16 +492,16 @@ unsigned int kgpu_poll(struct file *filp, poll_table *wait)
 {
     unsigned int mask = 0;
     
-    spin_lock(&reqlock);
+    spin_lock(&(kgpudev.reqlock));
     
-    poll_wait(filp, &reqq, wait);
+    poll_wait(filp, &(kgpudev.reqq), wait);
 
-    if (!list_empty(&reqs)) 
+    if (!list_empty(&(kgpudev.reqs))) 
 	mask |= POLLIN | POLLRDNORM;
 
     mask |= POLLOUT | POLLWRNORM;
 
-    spin_unlock(&reqlock);
+    spin_unlock(&(kgpudev.reqlock));
 
     return mask;
 }
@@ -703,31 +523,33 @@ int kgpu_init(void)
     int devno;
     int i;
     
-    INIT_LIST_HEAD(&reqs);
-    INIT_LIST_HEAD(&resps);
-    INIT_LIST_HEAD(&rtdreqs);
+    INIT_LIST_HEAD(&(kgpudev.reqs));
+    INIT_LIST_HEAD(&(kgpudev.resps));
+    INIT_LIST_HEAD(&(kgpudev.rtdreqs));
     
-    spin_lock_init(&reqlock);
-    spin_lock_init(&resplock);
-    spin_lock_init(&rtdreqlock);
+    spin_lock_init(&(kgpudev.reqlock));
+    spin_lock_init(&(kgpudev.resplock));
+    spin_lock_init(&(kgpudev.rtdreqlock));
 
-    init_waitqueue_head(&reqq);
+    init_waitqueue_head(&(kgpudev.reqq));
 
-    spin_lock_init(&ridlock);
-    spin_lock_init(&buflock);
+    spin_lock_init(&(kgpudev.ridlock));
+    spin_lock_init(&(kgpudev.buflock));
+
+    kgpudev.rid_sequence = 0;
 
     kgpu_req_cache = kmem_cache_create(
 	"kgpu_req_cache", sizeof(struct kgpu_req), 0,
 	SLAB_HWCACHE_ALIGN, kgpu_req_constructor);
     if (!kgpu_req_cache) {
-	printk("[kgpu] Error: can't create request cache\n");
+	kgpu_log(LGPU_LOG_ERROR, "can't create request cache\n");
 	return -EFAULT;
     }
     kgpu_resp_cache = kmem_cache_create(
 	"kgpu_resp_cache", sizeof(struct kgpu_resp), 0,
 	SLAB_HWCACHE_ALIGN, kgpu_resp_constructor);
     if (!kgpu_resp_cache) {
-	printk("[kgpu] Error: can't create response cache\n");
+	kgpu_log(LGPU_LOG_ERROR, "can't create response cache\n");
 	kmem_cache_destroy(kgpu_req_cache);
 	return -EFAULT;
     }
@@ -736,30 +558,30 @@ int kgpu_init(void)
 	"kgpu_allocated_buf_cache", sizeof(struct kgpu_allocated_buffer), 0,
 	SLAB_HWCACHE_ALIGN, kgpu_allocated_buf_constructor);
     if (!kgpu_allocated_buf_cache) {
-	printk("[kgpu] Error: can't create allocated buffer cache\n");
+	kgpu_log(LGPU_LOG_ERROR, "can't create allocated buffer cache\n");
 	kmem_cache_destroy(kgpu_allocated_buf_cache);
 	return -EFAULT;
     }
 
     /* initialize buffer info */
-    memset(kgpu_mgmt_bufs, 0, sizeof(struct kgpu_mgmt_buffer)*KGPU_BUF_NR);
+    memset(kgpudev.mgmt_bufs, 0, sizeof(struct kgpu_mgmt_buffer)*KGPU_BUF_NR);
 
     /* alloc dev */	
     result = alloc_chrdev_region(&dev, 0, 1, KGPU_DEV_NAME);
     kgpu_major = MAJOR(dev);
 
     if (result < 0) {
-	printk("[kgpu] Error: can't get major\n");
+        kgpu_log(KGPU_LOG_ERROR, "can't get major\n");
     } else {
-	printk("[kgpu] Info: major %d\n", kgpu_major);
+	kgpu_log(KGPU_LOG_PRINT, "major %d\n", kgpu_major);
 	devno = MKDEV(kgpu_major, 0);
-	memset(&kgpudev, 0, sizeof(struct cdev));
-	cdev_init(&kgpudev, &kgpu_ops);
-	kgpudev.owner = THIS_MODULE;
-	kgpudev.ops = &kgpu_ops;
-	result = cdev_add(&kgpudev, devno, 1);
+	memset(&kgpudev.cdev, 0, sizeof(struct cdev));
+	cdev_init(&kgpudev.cdev, &kgpu_ops);
+	kgpudev.cdev.owner = THIS_MODULE;
+	kgpudev.cdev.ops = &kgpu_ops;
+	result = cdev_add(&kgpudev.cdev, devno, 1);
 	if (result) {
-	    printk("[kgpu] Error: can't add device %d", result);
+	    kgpu_log(KGPU_LOG_ERROR, "can't add device %d", result);
 	}
     }
 
@@ -770,7 +592,7 @@ EXPORT_SYMBOL_GPL(kgpu_init);
 void kgpu_cleanup(void)
 {
     dev_t devno = MKDEV(kgpu_major, 0);
-    cdev_del(&kgpudev);
+    cdev_del(&kgpudev.cdev);
 
     unregister_chrdev_region(devno, 1);
     if (kgpu_req_cache)
@@ -783,23 +605,23 @@ void kgpu_cleanup(void)
 
     /* clean up buffer info */
     for (i=0; i<KGPU_BUF_NR; i++) {
-	kfree(kgpu_mgmt_bufs[i].bitmap);
-	kfree(kgpu_mgmt_bufs[i].paddrs);
+	kfree(kgpudev.mgmt_bufs[i].bitmap);
+	kfree(kgpudev.mgmt_bufs[i].paddrs);
     }
-    memset(kgpu_mgmt_bufs, 0, sizeof(struct kgpu_mgmt_buffer)*KGPU_BUF_NR);
+    memset(kgpudev.mgmt_bufs, 0, sizeof(struct kgpu_mgmt_buffer)*KGPU_BUF_NR);
 }
 EXPORT_SYMBOL_GPL(kgpu_cleanup);
 
 static int __init mod_init(void)
 {
-    printk(KERN_INFO "[kgpu] KGPU loaded\n");
+    kgpu_log(KGPU_LOG_PRINT, "KGPU loaded\n");
     return kgpu_init();
 }
 
 static void __exit mod_exit(void)
 {
     kgpu_cleanup();
-    printk(KERN_INFO "[kgpu] KGPU unloaded\n");
+    kgpu_log(KGPU_LOG_PRINT, "KGPU unloaded\n");
 }
 
 module_init(mod_init);

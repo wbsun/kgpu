@@ -201,7 +201,7 @@ EXPORT_SYMBOL_GPL(free_kgpu_response);
 static void kgpu_allocated_buf_constructor(void *data)
 {
     struct kgpu_allocated_buffer *buf = (struct kgpu_allocated_buffer*)data;
-    memset(buf, 0, sizeof(struct kgpu_allocated_buffer);
+    memset(buf, 0, sizeof(struct kgpu_allocated_buffer));
 }
 
 struct kgpu_buffer* alloc_gpu_buffer(unsigned long nbytes)
@@ -225,9 +225,9 @@ struct kgpu_buffer* alloc_gpu_buffer(unsigned long nbytes)
 	    abuf = kmem_cache_alloc(kgpu_allocated_buf_cache, GFP_KERNEL);
 	    abuf->mgmt_buf_idx = i;
 	    abuf->buf.npages = req_nunits*KGPU_BUF_NR_FRAMES_PER_UNIT;
-	    abuf->pas = kgpudev.mgmt_bufs[i].paddrs+(idx*KGPU_BUF_NR_FRAMES_PER_UNIT);
-	    abuf->va = (unsigned long)(kgpudev.mgmt_bufs[i].gb.addr)
-		+(idx*KGPU_BUF_UNIT_SIZE);
+	    abuf->buf.pas = kgpudev.mgmt_bufs[i].paddrs+(idx*KGPU_BUF_NR_FRAMES_PER_UNIT);
+	    abuf->buf.va = (void*)((unsigned long)(kgpudev.mgmt_bufs[i].gb.addr)
+				   +(idx*KGPU_BUF_UNIT_SIZE));
 	    
 	    return &(abuf->buf);
 	}
@@ -243,10 +243,10 @@ int free_gpu_buffer(struct kgpu_buffer *buf)
     int nr, idx;
     struct kgpu_allocated_buffer *abuf =
 	container_of(buf, struct kgpu_allocated_buffer, buf);
-    struct kgpu_mgmt_buffer *mbuf = kgpudev.mgmt_bufs[abuf->mgmt_buf_idx];
+    struct kgpu_mgmt_buffer *mbuf = &(kgpudev.mgmt_bufs[abuf->mgmt_buf_idx]);
 
     nr = buf->npages/KGPU_BUF_NR_FRAMES_PER_UNIT;
-    idx = ((unsigned long)(buf->va) - (unsigend long)(mbuf->gb.addr))
+    idx = ((unsigned long)(buf->va) - (unsigned long)(mbuf->gb.addr))
 	/KGPU_BUF_UNIT_SIZE;
 
     spin_lock(&(kgpudev.buflock));
@@ -322,7 +322,7 @@ ssize_t kgpu_read(struct file *filp, char __user *buf, size_t c, loff_t *fpos)
 	spin_lock(&(kgpudev.reqlock));
     }
 
-    r = reqs.next;
+    r = kgpudev.reqs.next;
     list_del(r);
     req = list_entry(r, struct kgpu_req, list);
     if (req) {
@@ -403,7 +403,7 @@ ssize_t kgpu_write(struct file *filp, const char __user *buf,
 
 static int set_gpu_bufs(char __user *buf)
 {
-    int off=0, i, j, nframes;
+    int off=0, i, j;
     
     spin_lock(&(kgpudev.buflock));
 
@@ -411,7 +411,7 @@ static int set_gpu_bufs(char __user *buf)
 	struct kgpu_mgmt_buffer *mbuf = &(kgpudev.mgmt_bufs[i]);
 	copy_from_user(&mbuf->gb, buf+off, sizeof(struct gpu_buffer));
 
-#ifdef 0
+#if 0
 	if (!kgpu_check_phy_consecutive((unsigned long)(mbuf->gb.addr),
 				   mbuf->gb.size, PAGE_SIZE)) {
 	    kgpu_log(KGPU_LOG_ERROR, "GPU buffer %p is not physically consecutive\n",
@@ -521,7 +521,6 @@ int kgpu_init(void)
     int result;
     dev_t dev = 0;
     int devno;
-    int i;
     
     INIT_LIST_HEAD(&(kgpudev.reqs));
     INIT_LIST_HEAD(&(kgpudev.resps));
@@ -542,14 +541,14 @@ int kgpu_init(void)
 	"kgpu_req_cache", sizeof(struct kgpu_req), 0,
 	SLAB_HWCACHE_ALIGN, kgpu_req_constructor);
     if (!kgpu_req_cache) {
-	kgpu_log(LGPU_LOG_ERROR, "can't create request cache\n");
+	kgpu_log(KGPU_LOG_ERROR, "can't create request cache\n");
 	return -EFAULT;
     }
     kgpu_resp_cache = kmem_cache_create(
 	"kgpu_resp_cache", sizeof(struct kgpu_resp), 0,
 	SLAB_HWCACHE_ALIGN, kgpu_resp_constructor);
     if (!kgpu_resp_cache) {
-	kgpu_log(LGPU_LOG_ERROR, "can't create response cache\n");
+	kgpu_log(KGPU_LOG_ERROR, "can't create response cache\n");
 	kmem_cache_destroy(kgpu_req_cache);
 	return -EFAULT;
     }
@@ -558,7 +557,7 @@ int kgpu_init(void)
 	"kgpu_allocated_buf_cache", sizeof(struct kgpu_allocated_buffer), 0,
 	SLAB_HWCACHE_ALIGN, kgpu_allocated_buf_constructor);
     if (!kgpu_allocated_buf_cache) {
-	kgpu_log(LGPU_LOG_ERROR, "can't create allocated buffer cache\n");
+	kgpu_log(KGPU_LOG_ERROR, "can't create allocated buffer cache\n");
 	kmem_cache_destroy(kgpu_allocated_buf_cache);
 	return -EFAULT;
     }
@@ -591,6 +590,7 @@ EXPORT_SYMBOL_GPL(kgpu_init);
 
 void kgpu_cleanup(void)
 {
+    int i;
     dev_t devno = MKDEV(kgpu_major, 0);
     cdev_del(&kgpudev.cdev);
 

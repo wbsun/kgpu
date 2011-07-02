@@ -86,7 +86,7 @@ int init_kgpu(void)
     /* alloc GPU Pinned memory buffers */
     for (i=0; i<KGPU_BUF_NR; i++) {
 	hostbufs[i].addr = (void*)alloc_pinned_mem(KGPU_BUF_SIZE);
-	gbugs[i].size = KGPU_BUF_SIZE;
+	hostbufs[i].size = KGPU_BUF_SIZE;
 	dbg("%p \n", hostbufs[i].addr);
 	memset(hostbufs[i].addr, 0, KGPU_BUF_SIZE);
 	ssc( mlock(hostbufs[i].addr, KGPU_BUF_SIZE));

@@ -72,6 +72,8 @@ extern int kgpu_log_level;
 
 #ifdef __KERNEL__
 
+#include <linux/list.h>
+
 /*
  * Kernel mode KGPU code
  */

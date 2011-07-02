@@ -46,7 +46,6 @@ void init_gpu()
 
     for (i=0; i< KGPU_BUF_NR; i++) {
 	devbufs[i].addr = alloc_dev_mem(KGPU_BUF_SIZE);
-	devbufuses[i] = 0;
     }
 
     for (i=0; i<MAX_STREAM_NR; i++) {

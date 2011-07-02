@@ -31,7 +31,7 @@ struct sritem {
 
 static int devfd;
 
-static struct gpu_buffer gbufs[KGPU_BUF_NR];
+struct gpu_buffer hostbufs[KGPU_BUF_NR];
 
 volatile int loop_continue = 1;
 
@@ -85,17 +85,17 @@ int init_kgpu(void)
 
     /* alloc GPU Pinned memory buffers */
     for (i=0; i<KGPU_BUF_NR; i++) {
-	gbufs[i].addr = (void*)alloc_pinned_mem(KGPU_BUF_SIZE);
+	hostbufs[i].addr = (void*)alloc_pinned_mem(KGPU_BUF_SIZE);
 	gbugs[i].size = KGPU_BUF_SIZE;
-	dbg("%p \n", gbufs[i].addr);
-	memset(gbufs[i].addr, 0, KGPU_BUF_SIZE);
-	ssc( mlock(gbufs[i].addr, KGPU_BUF_SIZE));
+	dbg("%p \n", hostbufs[i].addr);
+	memset(hostbufs[i].addr, 0, KGPU_BUF_SIZE);
+	ssc( mlock(hostbufs[i].addr, KGPU_BUF_SIZE));
     }
     
     len = KGPU_BUF_NR*sizeof(struct gpu_buffer);
 
     /* tell kernel the buffers */
-    r = ioctl(devfd, KGPU_IOC_SET_GPU_BUFS, (unsigned long)gbufs);
+    r = ioctl(devfd, KGPU_IOC_SET_GPU_BUFS, (unsigned long)hostbufs);
     if (r < 0) {
 	perror("Write req file for buffers.");
 	abort();
@@ -114,7 +114,7 @@ int finit_kgpu(void)
     finit_gpu();
 
     for (i=0; i<KGPU_BUF_NR; i++) {
-	free_pinned_mem(gbufs[i].addr);
+	free_pinned_mem(hostbufs[i].addr);
     }
     return 0;
 }

@@ -36,6 +36,9 @@ struct service_request {
 #define REQ_POST_EXEC 5
 #define REQ_DONE 6
 
+extern struct gpu_buffer hostbufs[KGPU_BUF_NR];
+extern struct gpu_buffer devbufs[KGPU_BUF_NR];
+
 #ifdef __cplusplus
 extern "C" {
 #endif

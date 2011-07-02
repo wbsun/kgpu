@@ -38,8 +38,7 @@ static int streamuses[MAX_STREAM_NR];
 static const dim3 default_block_size(32,1);
 static const dim3 default_grid_size(512,1);
 
-static struct gpu_buffer devbufs[KGPU_BUF_NR];
-static int devbufuses[KGPU_BUF_NR];
+struct gpu_buffer devbufs[KGPU_BUF_NR];
 
 void init_gpu()
 {
@@ -109,40 +108,52 @@ int post_finished(struct service_request *sreq)
     return __check_stream_done(s);
 }
 
+/*
+ * Allocation policy is simple here: copy what the kernel part does
+ * for the GPU memory. This works because:
+ *   - GPU memory and host memory are identical in size
+ *   - Whenever a host memory region is allocated, the same-sized
+ *     GPU memory must be used for its GPU computation.
+ *   - The data field in ku_request also uses pinned memory but we
+ *     won't allocate GPU memory for it cause it is just for
+ *     service provider. This is fine since the data tend to be
+ *     very tiny.
+ */
 int alloc_gpu_mem(struct service_request *sreq)
 {
-    int i;
+    int i, oks=0;
+    unsigned long inaddr = (unsigned long)(sreq->kureq.input);
+    unsigned long outaddr = (unsigned long)(sreq->kureq.output);
 
     for (i=0; i<KGPU_BUF_NR; i++) {
-	if (!devbufuses[i]) {
-	    devbufuses[i] = 1;
-	    sreq->dinput = devbufs[i].addr;
+	unsigned long hostbase = (unsigned long)(hostbufs[i].addr);
+	unsigned long devbase = (unsigned long)(devbufs[i].addr);
 
-	    /*
-	     * A good solution is to assign doutput = dinput+insize, but then
-	     * no way to overlap.
-	     * More fields are needed to assign the doutput more effectively.
-	     */
-	    sreq->doutput = (void*)(
-		(unsigned long)(sreq->dinput)
-		+ (unsigned long)(sreq->kureq.output) - (unsigned long)(sreq->kureq.input));
-	    return 0;
+	// for input
+        if (hostbase <= inaddr
+	    && hostbase + hostbufs[i].size >= inaddr + sreq->kureq.insize) {
+	    sreq->dinput = (void*)(devbase + (inaddr-hostbase));
+	    if (oks)
+		return 0;
+	    oks++;
 	}
+
+	// for output
+	if (hostbase <= outaddr
+	    && hostbase + hostbufs[i].size >= outaddr + sreq->kureq.outsize) {
+	    sreq->doutput = (void*)(devbase + (outaddr-hostbase));
+	    if (oks)
+		return 0;
+	    oks++;
+	}	
     }
     return 1;
 }
 
 void free_gpu_mem(struct service_request *sreq)
 {
-    int i;
-
-    for (i=0; i<KGPU_BUF_NR; i++) {
-	if (sreq->dinput == devbufs[i].addr) {
-	    devbufuses[i] = 0;
-	    sreq->dinput = NULL;
-	    sreq->doutput = NULL;
-	}
-    }
+    sreq->dinput = NULL;
+    sreq->doutput = NULL;
 }
 
 int alloc_stream(struct service_request *sreq)

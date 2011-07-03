@@ -12,6 +12,9 @@
 
 #include "kgpu.h"
 
+#define kgpu_log(level, ...) kgpu_do_log(level, "helper", ##__VA_ARGS__)
+#define dbg(...) kgpu_log(KGPU_LOG_DEBUG, ##__VA_ARGS__)
+
 extern struct gpu_buffer hostbufs[KGPU_BUF_NR];
 extern struct gpu_buffer devbufs[KGPU_BUF_NR];
 

@@ -20,13 +20,13 @@
 #include <linux/uaccess.h>
 #include <asm/page.h>
 
-#include "../../../kgpu/kkgpu.h"
+#include "../../../kgpu/kgpu.h"
 
 int mycb(struct kgpu_req *req, struct kgpu_resp *resp)
 {
     printk("[calg2]: REQ ID: %d, RESP ID: %d, RESP CODE: %d, %d\n",
 	   req->kureq.id, resp->kuresp.id, resp->kuresp.errcode,
-	   *(int*)(__va(((struct kgpu_buffer*)(req->data))->paddr)));
+	   *(int*)(__va(((struct kgpu_buffer*)(req->data))->pas[0])));
     free_gpu_buffer((struct kgpu_buffer*)(req->data));
     free_kgpu_request(req);
     free_kgpu_response(resp);
@@ -51,7 +51,7 @@ static int __init minit(void)
 	printk("[calg2] Error: response null\n");
 	return 0;
     }
-    buf = alloc_gpu_buffer();
+    buf = alloc_gpu_buffer(PAGE_SIZE);
     if (!buf) {
 	printk("[calg2] Error: buffer null\n");
 	return 0;
@@ -60,14 +60,14 @@ static int __init minit(void)
     /*req->kureq.id = next_kgpu_request_id();*/
     resp->kuresp.id = req->kureq.id;
 
-    req->kureq.input = buf->gb.addr;
+    req->kureq.input = buf->va;
     req->kureq.insize = 1024;
     req->kureq.output = req->kureq.input;/*+1024;*/
     req->kureq.outsize = 1024;
     strcpy(req->kureq.sname, "test_service");
     req->cb = mycb;
 
-    *(int*)(__va(buf->paddr)) = 100;
+    *(int*)(__va(buf->pas[0])) = 100;
     call_gpu(req, resp);
     
     return 0;

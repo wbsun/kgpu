@@ -24,7 +24,7 @@
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
 #include <crypto/aes.h>
-#include "../../../kgpu/kkgpu.h"
+#include "../../../kgpu/kgpu.h"
 #include "../gaesk.h"
 
 struct crypto_ctr_ctx {
@@ -183,7 +183,7 @@ static int _crypto_gaes_ctr_crypt(struct blkcipher_desc *desc,
 
 	blkcipher_walk_init(&walk, dst, src, sz);
     
-	buf = alloc_gpu_buffer();
+	buf = alloc_gpu_buffer(sz+2*PAGE_SIZE);
 	if (!buf) {
 		printk("[gaes_ctr] Error: GPU buffer is null.\n");
 		return -EFAULT;
@@ -200,7 +200,7 @@ static int _crypto_gaes_ctr_crypt(struct blkcipher_desc *desc,
 	
 	while ((nbytes = walk.nbytes)) {
 		u8 *wsrc = walk.src.virt.addr;
-		if (nbytes > KGPU_BUF_FRAME_SIZE) {
+		if (nbytes > PAGE_SIZE) {
 			return -EFAULT;
 		}
 		
@@ -210,20 +210,20 @@ static int _crypto_gaes_ctr_crypt(struct blkcipher_desc *desc,
 		
 #endif
 		
-		gpos = buf->paddrs[i++];
+		gpos = buf->pas[i++];
 		memcpy(__va(gpos), wsrc, nbytes);
 		
 		err = blkcipher_walk_done(desc, &walk, 0);
 	}
 	
-	gpos = buf->paddrs[i];
+	gpos = buf->pas[i];
 	memcpy(__va(gpos), &(ctx->info), sizeof(struct crypto_gaes_ctr_info));
 	memcpy(((struct crypto_gaes_ctr_info*)__va(gpos))->ctrblk, ctrblk,
 	       crypto_cipher_blocksize(ctx->child));
 	
 	strcpy(req->kureq.sname, "gaes_ctr");
-	req->kureq.input = buf->gb.addr;
-	req->kureq.output = buf->gb.addr;
+	req->kureq.input = buf->va;
+	req->kureq.output = buf->va;
 	req->kureq.insize = sz+PAGE_SIZE;
 	req->kureq.outsize = sz;
 	
@@ -237,7 +237,7 @@ static int _crypto_gaes_ctr_crypt(struct blkcipher_desc *desc,
 		
 		while ((nbytes = walk.nbytes)) {
 			u8 *wdst = walk.dst.virt.addr;
-			if (nbytes > KGPU_BUF_FRAME_SIZE) {
+			if (nbytes > PAGE_SIZE) {
 				return -EFAULT;
 			}
 			
@@ -246,7 +246,7 @@ static int _crypto_gaes_ctr_crypt(struct blkcipher_desc *desc,
 				printk("[gaes_ctr] WARNING: %u is not PAGE_SIZE\n", nbytes);
 #endif
 			
-			gpos = buf->paddrs[i++];	
+			gpos = buf->pas[i++];	
 			memcpy(wdst, __va(gpos), nbytes);       
 			
 			err = blkcipher_walk_done(desc, &walk, 0);

@@ -20,7 +20,7 @@
 #include <linux/uaccess.h>
 #include <asm/page.h>
 
-#include "../../../kgpu/kkgpu.h"
+#include "../../../kgpu/kgpu.h"
 
 int mycb(struct kgpu_req *req, struct kgpu_resp *resp)
 {
@@ -50,7 +50,7 @@ static int __init minit(void)
 	printk("[callgpu] Error: response null\n");
 	return 0;
     }
-    buf = alloc_gpu_buffer();
+    buf = alloc_gpu_buffer(PAGE_SIZE);
     if (!buf) {
 	printk("[callgpu] Error: buffer null\n");
 	return 0;
@@ -58,9 +58,9 @@ static int __init minit(void)
     req->data = buf;
     resp->kuresp.id = req->kureq.id;
 
-    req->kureq.input = buf->gb.addr;
+    req->kureq.input = buf->va;
     req->kureq.insize = 1024;
-    req->kureq.output = req->kureq.input+1024;
+    req->kureq.output = (void*)((unsigned long)(req->kureq.input)+1024);
     req->kureq.outsize = 1024;
     strcpy(req->kureq.sname, "nonexist service");
     req->cb = mycb;

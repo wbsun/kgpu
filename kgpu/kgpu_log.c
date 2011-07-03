@@ -5,7 +5,7 @@
  * Copyright (c) 2010-2011 University of Utah and the Flux Group.
  * All rights reserved.
  *
- * Common functions used by both kernel and user space.
+ * Log functions used by both kernel and user space.
  */
 #include "kgpu.h"
 
@@ -17,11 +17,18 @@
 #define printk printf
 #define vprintk vprintf
 
+#else
+
+#include <linux/kernel.h>
+#include <linux/module.h>
+
 #endif /* __KERNEL__ */
 
 int kgpu_log_level = KGPU_LOG_ALERT;
 
-void kgpu_log(int level, const char *fmt, ...)
+void
+kgpu_generic_log(int level, const char *module, const char *filename,
+	    int lineno, const char *fmt, ...)
 {
     va_list args;
     
@@ -30,19 +37,19 @@ void kgpu_log(int level, const char *fmt, ...)
     
     switch(level) {
     case KGPU_LOG_INFO:
-	printk("[kgpu] INFO: ");
+	printk("[%s] %s::%d INFO: ", module, filename, lineno);
 	break;
     case KGPU_LOG_DEBUG:
-	printk("[kgpu] DEBUG: ");
+	printk("[%s] %s::%d DEBUG: ", module, filename, lineno);
 	break;
     case KGPU_LOG_ALERT:
-	printk("[kgpu] ALERT: ");
+	printk("[%s] %s::%d ALERT: ", module, filename, lineno);
 	break;
     case KGPU_LOG_ERROR:
-	printk("[kgpu] ERROR: ");
+	printk("[%s] %s::%d ERROR: ", module, filename, lineno);
 	break;
     case KGPU_LOG_PRINT:
-	printk("[kgpu]: ");
+	printk("[%s] %s::%d: ", module, filename, lineno);
 	break;
     default:
 	break;
@@ -52,3 +59,10 @@ void kgpu_log(int level, const char *fmt, ...)
     vprintk(fmt, args);
     va_end(args);
 }
+
+#ifdef __KERNEL__
+
+EXPORT_SYMBOL_GPL(kgpu_generic_log);
+EXPORT_SYMBOL_GPU(kgpu_log_level);
+
+#endif /* __KERNEL__ */

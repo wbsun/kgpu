@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <cuda.h>
-#include "../../../kgpu/helper.h"
+#include "../../../kgpu/kgpu.h"
 #include "../../../kgpu/gputils.h"
 #include "../gaesu.h"
 

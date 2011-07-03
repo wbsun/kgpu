@@ -15,6 +15,9 @@
 #include "kgpu.h"
 #include <linux/types.h>
 
+#define kgpu_log(level, ...) kgpu_do_log(level, "kgpu", ##__VA_ARGS__)
+#define dbg(...) kgpu_log(KGPU_LOG_DEBUG, ##__VA_ARGS__)
+
 /*
  * Buffer management stuff, put them here in case we may
  * create a kgpu_buf.c for buffer related functions.

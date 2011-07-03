@@ -12,30 +12,6 @@
 
 #include "kgpu.h"
 
-struct service;
-
-struct service_request {
-    struct ku_request kureq;
-    struct service *s;
-    int block_x, block_y;
-    int grid_x, grid_y;
-    int state;
-    int errcode;
-    int stream_id;
-    unsigned long stream;
-    void *dinput;
-    void *doutput;
-    void *data;
-};
-
-/* service request states: */
-#define REQ_INIT 1
-#define REQ_MEM_DONE 2
-#define REQ_PREPARED 3
-#define REQ_RUNNING 4
-#define REQ_POST_EXEC 5
-#define REQ_DONE 6
-
 extern struct gpu_buffer hostbufs[KGPU_BUF_NR];
 extern struct gpu_buffer devbufs[KGPU_BUF_NR];
 
@@ -62,7 +38,5 @@ extern "C" {
 #ifdef __cplusplus
 }
 #endif
-
-#include "service.h"
    
 #endif

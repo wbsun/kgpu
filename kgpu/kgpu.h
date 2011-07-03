@@ -12,17 +12,10 @@
 #ifndef __KGPU_H__
 #define __KGPU_H__
 
-#include <linux/ioctl.h>
-
 struct gpu_buffer {
     void *addr;
     unsigned long size;
 };
-
-#define KGPU_BUF_NR 1
-#define KGPU_BUF_SIZE (1024*1024*1024)
-
-#define KGPU_DEV_NAME "kgpu"
 
 #define SERVICE_NAME_SIZE 32
 
@@ -47,6 +40,19 @@ struct ku_response {
     int errcode;
 };
 
+/*
+ * Only for kernel code or helper
+ */
+#if defined __KERNEL__ || defined __KGPU__
+
+#define KGPU_BUF_NR 1
+#define KGPU_BUF_SIZE (1024*1024*1024)
+
+#define KGPU_DEV_NAME "kgpu"
+
+/* ioctl */
+#include <linux/ioctl.h>
+
 #define KGPU_IOC_MAGIC 'g'
 
 #define KGPU_IOC_SET_GPU_BUFS _IOW(KGPU_IOC_MAGIC, 1, struct gpu_buffer[KGPU_BUF_NR])
@@ -55,28 +61,49 @@ struct ku_response {
 
 #define KGPU_IOC_MAXNR 4
 
+#include "kgpu_log.h"
 
-/* log stuff */
-#define KGPU_LOG_INFO  1
-#define KGPU_LOG_DEBUG 2
-#define KGPU_LOG_ALERT 3
-#define KGPU_LOG_ERROR 4
-#define KGPU_LOG_PRINT 5
+#endif /* __KERNEL__ || __KGPU__  */
 
-extern void kgpu_log(int level, const char *fmt, ...);
-extern int kgpu_log_level;
+/*
+ * For helper and service providers
+ */
+#ifndef __KERNEL__
 
-/* shorthand for debug */
-#define dbg(...) kgpu_log(KGPU_LOG_DEBUG, __VA_ARGS__)
+struct service;
 
+struct service_request {
+    struct ku_request kureq;
+    struct service *s;
+    int block_x, block_y;
+    int grid_x, grid_y;
+    int state;
+    int errcode;
+    int stream_id;
+    unsigned long stream;
+    void *dinput;
+    void *doutput;
+    void *data;
+};
 
+/* service request states: */
+#define REQ_INIT 1
+#define REQ_MEM_DONE 2
+#define REQ_PREPARED 3
+#define REQ_RUNNING 4
+#define REQ_POST_EXEC 5
+#define REQ_DONE 6
+
+#include "service.h"
+
+#endif /* no __KERNEL__ */
+
+/*
+ * For kernel code only
+ */
 #ifdef __KERNEL__
 
 #include <linux/list.h>
-
-/*
- * Kernel mode KGPU code
- */
 
 struct kgpu_buffer {
     void *va;

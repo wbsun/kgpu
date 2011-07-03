@@ -28,6 +28,9 @@ typedef int (*fn_init_service)(
 typedef int (*fn_finit_service)(
     void* libhandle, int (*unreg_srv)(const char*));
 
+
+#ifdef __KGPU__
+
 struct service * lookup_service(const char *name);
 int register_service(struct service *s, void *libhandle);
 int unregister_service(const char *name);
@@ -35,5 +38,7 @@ int load_service(const char *libpath);
 int load_all_services(const char *libdir);
 int unload_service(const char *name);
 int unload_all_services();
+
+#endif /* __KGPU__ */
 
 #endif

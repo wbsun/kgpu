@@ -112,7 +112,7 @@ int gaes_ecb_prepare(struct service_request *sr)
 {
     cudaStream_t s = (cudaStream_t)(sr->stream);//get_stream(sr->stream_id);
     struct gaes_ecb_data *data = (struct gaes_ecb_data *)malloc(sizeof(struct gaes_ecb_data));
-    struct crypto_aes_ctx *ctx = (struct crypto_aes_ctx*)((u8*)(sr->kureq.input) + (sr->kureq.outsize));
+    struct crypto_aes_ctx *ctx = (struct crypto_aes_ctx*)(sr->kureq.data);
     
     data->nrounds = ctx->key_length/4+6;
     data->h_key = (sr->s == &gaes_ecb_dec_srv)?ctx->key_dec: ctx->key_enc;                         
@@ -135,6 +135,18 @@ int gaes_ecb_post(struct service_request *sr)
 
 #define gaes_ctr_compute_size gaes_ecb_compute_size_bpt
 #define gaes_ctr_post gaes_ecb_post
+
+int gaes_lctr_compute_size(struct service_request *sr)
+{
+    struct crypto_gaes_ctr_info *info
+	= (struct crypto_gaes_ctr_info*)(sr->kureq.data);
+    sr->block_x = info->ctr_range/16;
+    sr->grid_x = sr->kureq.outsize/sr->block_x;
+    sr->block_y = 1;
+    sr->grid_y = 1;
+
+    return 0;
+}
 
 int gaes_ctr_launch(struct service_request *sr)
 {
@@ -159,7 +171,7 @@ int gaes_ctr_prepare(struct service_request *sr)
     cudaStream_t s = (cudaStream_t)(sr->stream);
     struct gaes_ctr_data *data = (struct gaes_ctr_data *)malloc(sizeof(struct gaes_ctr_data));
     struct crypto_gaes_ctr_info *info = (struct crypto_gaes_ctr_info*)
-	((u8*)(sr->kureq.input) + (sr->kureq.outsize));
+	(sr->kureq.data);
     
     data->nrounds = info->key_length/4+6;
     data->h_key = info->key_enc;
@@ -208,7 +220,7 @@ extern "C" int init_service(void *lh, int (*reg_srv)(struct service*, void*))
 
     sprintf(gaes_lctr_srv.name, "gaes_lctr");
     gaes_lctr_srv.sid = 0;
-    gaes_lctr_srv.compute_size = gaes_ctr_compute_size;
+    gaes_lctr_srv.compute_size = gaes_lctr_compute_size;
     gaes_lctr_srv.launch = gaes_lctr_launch;
     gaes_lctr_srv.prepare = gaes_ctr_prepare;
     gaes_lctr_srv.post = gaes_ctr_post;

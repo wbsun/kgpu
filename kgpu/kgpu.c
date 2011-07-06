@@ -157,6 +157,7 @@ static void kgpu_req_constructor(void* data)
 {
     struct kgpu_req *req = (struct kgpu_req*)data;
     if (req) {
+	memset(req, 0, sizeof(struct kgpu_req));
 	req->kureq.id = next_kgpu_request_id();
 	INIT_LIST_HEAD(&req->list);
 	req->kureq.sname[0] = 0;
@@ -180,6 +181,7 @@ static void kgpu_resp_constructor(void *data)
 {
     struct kgpu_resp *resp = (struct kgpu_resp*)data;
     if (resp) {
+	memset(resp, 0, sizeof(struct kgpu_resp));
 	resp->kuresp.errcode = KGPU_NO_RESPONSE;
 	INIT_LIST_HEAD(&resp->list);
     }

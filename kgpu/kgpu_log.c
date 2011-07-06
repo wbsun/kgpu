@@ -63,6 +63,6 @@ kgpu_generic_log(int level, const char *module, const char *filename,
 #ifdef __KERNEL__
 
 EXPORT_SYMBOL_GPL(kgpu_generic_log);
-EXPORT_SYMBOL_GPU(kgpu_log_level);
+EXPORT_SYMBOL_GPL(kgpu_log_level);
 
 #endif /* __KERNEL__ */

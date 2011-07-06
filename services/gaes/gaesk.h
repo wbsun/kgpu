@@ -15,11 +15,6 @@
 #define GAES_ECB_SIZE_THRESHOLD (PAGE_SIZE)
 #define GAES_CTR_SIZE_THRESHOLD (PAGE_SIZE)
 
-struct async_gaes_info {
-    int (*callback)(struct async_gaes_info*);
-    void *data;
-};
-
 
 /* only take the low-64bit for adding */
 static void big_u128_add(u8 *ctr, u64 offset, u8 *res)

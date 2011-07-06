@@ -169,8 +169,8 @@ static int _crypto_gaes_ctr_crypt(struct blkcipher_desc *desc,
 {
 	int err=0;
 	unsigned int nbytes;
+	unsigned long cpdbytes = 0;
 	u8* gpos;
-	int i = 0;
 	u8 *ctrblk;	
     
 	struct kgpu_req *req;
@@ -210,13 +210,14 @@ static int _crypto_gaes_ctr_crypt(struct blkcipher_desc *desc,
 		
 #endif
 		
-		gpos = buf->pas[i++];
+		gpos = (u8*)(buf->pas[cpdbytes>>PAGE_SHIFT])+(cpdbytes&(PAGE_SIZE-1));
 		memcpy(__va(gpos), wsrc, nbytes);
+		cpdbytes += nbytes;
 		
 		err = blkcipher_walk_done(desc, &walk, 0);
 	}
 	
-	gpos = buf->pas[i];
+	gpos = (u8*)(buf->pas[cpdbytes>>PAGE_SHIFT])+(cpdbytes&(PAGE_SIZE-1));
 	memcpy(__va(gpos), &(ctx->info), sizeof(struct crypto_gaes_ctr_info));
 	memcpy(((struct crypto_gaes_ctr_info*)__va(gpos))->ctrblk, ctrblk,
 	       crypto_cipher_blocksize(ctx->child));
@@ -231,7 +232,7 @@ static int _crypto_gaes_ctr_crypt(struct blkcipher_desc *desc,
 		err = -EFAULT;
 		printk("[gaes_ctr] Error: callgpu error\n");
 	} else {
-		i=0;
+		cpdbytes = 0;
 		blkcipher_walk_init(&walk, dst, src, sz);
 		err = blkcipher_walk_virt(desc, &walk);
 		
@@ -246,8 +247,9 @@ static int _crypto_gaes_ctr_crypt(struct blkcipher_desc *desc,
 				printk("[gaes_ctr] WARNING: %u is not PAGE_SIZE\n", nbytes);
 #endif
 			
-			gpos = buf->pas[i++];	
+			gpos = (u8*)(buf->pas[cpdbytes>>PAGE_SHIFT])+(cpdbytes&(PAGE_SIZE-1));	
 			memcpy(wdst, __va(gpos), nbytes);       
+			cpdbytes += nbytes;
 			
 			err = blkcipher_walk_done(desc, &walk, 0);
 		}

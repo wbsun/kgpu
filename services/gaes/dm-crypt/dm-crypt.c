@@ -694,6 +694,9 @@ static u8 *iv_of_dmreq(struct crypt_config *cc,
 		crypto_ablkcipher_alignmask(any_tfm(cc)) + 1);
 }
 
+/*
+ * Deprecated
+ */
 static int crypt_convert_block(struct crypt_config *cc,
 			       struct convert_context *ctx,
 			       struct ablkcipher_request *req)
@@ -749,6 +752,80 @@ static int crypt_convert_block(struct crypt_config *cc,
 	return r;
 }
 
+/*
+ * For KGPU: convert all blocks together for speedup
+ */
+static int crypt_convert_blocks(struct crypt_config *cc,
+				struct convert_context *ctx,
+				struct ablkcipher_request *req)
+{
+    struct scatterlist *sgin, *sgout;
+    struct bio_vec *bvin, *bvout;
+    struct dm_crypt_request *dmreq;
+    u8 *iv = NULL;
+    int r = 0;
+    unsigned int sz = 0;
+
+    dmreq = dmreq_of_req(cc, req);
+
+    /* As for KGPU, we don't use this */
+    dmreq->iv_sector = ctx->sector;
+    dmreq->ctx = ctx;
+    iv = iv_of_dmreq(cc, dmreq);
+
+    printk("[dm-crypt] Info: convert %u blocks\n",
+	ctx->bio_in->bi_vcnt);
+
+    sgin = kmalloc(
+	(ctx->bio_in->bi_vcnt+ctx->bio_out->bi_vcnt)*
+	sizeof(struct scatterlist), GFP_KERNEL);
+    if (!sgin) {
+	printk("[dm-crypt] Error: out of memory %s:%d\n",
+	       __FILE__, __LINE__);
+	return -ENOMEM;
+    }
+    sgout = sgin + ctx->bio_in->bi_vcnt;
+
+    sg_init_table(sgin, ctx->bio_in->bi_vcnt);
+    sg_init_table(sgout, ctx->bio_out->bi_vcnt);
+
+    while (ctx->idx_in  < ctx->bio_in->bi_vcnt &&
+	   ctx->idx_out < ctx->bio_out->bi_vcnt) {
+	bvin  = bio_iovec_idx(ctx->bio_in, ctx->idx_in);
+	bvout = bio_iovec_idx(ctx->bio_out, ctx->idx_out);
+
+	sg_set_page(sgin+ctx->idx_in, bvin->bv_page, bvin->bv_len,
+		    bvin->bv_offset);
+	sg_set_page(sgout+ctx->idx_out, bvout->bv_page, bvout->bv_len,
+		    bvout->bv_offset);
+	ctx->idx_in++;
+	ctx->idx_out++;
+
+	sz += bvin->bv_len;
+    }
+
+    /* printk("[dm-crypt] Info: size %u\n", sz); */
+
+    if (cc->iv_gen_ops) {
+	r = cc->iv_gen_ops->generator(cc, iv, dmreq);
+	if (r < 0)
+	    return r;
+    }
+
+    ablkcipher_request_set_crypt(req, sgin, sgout, sz, iv);
+    if (bio_data_dir(ctx->bio_in) == WRITE)
+	r = crypto_ablkcipher_encrypt(req);
+    else
+	r = crypto_ablkcipher_decrypt(req);
+
+    if (!r && cc->iv_gen_ops && cc->iv_gen_ops->post)
+	r = cc->iv_gen_ops->post(cc, iv, dmreq);
+
+    kfree(sgin);
+
+    return r;
+}
+
 static void kcryptd_async_done(struct crypto_async_request *async_req,
 			       int error);
 
@@ -785,7 +862,7 @@ static int crypt_convert(struct crypt_config *cc,
 
 		atomic_inc(&ctx->pending);
 
-		r = crypt_convert_block(cc, ctx, this_cc->req);
+		r = crypt_convert_blocks(cc, ctx, this_cc->req);
 
 		switch (r) {
 		/* async */
@@ -1096,6 +1173,11 @@ static void kcryptd_crypt_write_convert(struct dm_crypt_io *io)
 	int r;
 
 	/*
+	 * Log record size of each IO request
+	 */
+	printk("dm-crypt: write size: %u\n", remaining);
+
+	/*
 	 * Prevent io from disappearing until this function completes.
 	 */
 	crypt_inc_pending(io);
@@ -1187,6 +1269,11 @@ static void kcryptd_crypt_read_convert(struct dm_crypt_io *io)
 {
 	struct crypt_config *cc = io->target->private;
 	int r = 0;
+
+	/*
+	 * Log read record size:
+	 */
+	printk("dm-crypt: read size %u\n", io->base_bio->bi_size);
 
 	crypt_inc_pending(io);
 
@@ -1410,6 +1497,8 @@ static void crypt_dtr(struct dm_target *ti)
 	kzfree(cc);
 }
 
+static char *cipher_str = "aes-ecb";
+
 static int crypt_ctr_cipher(struct dm_target *ti,
 			    char *cipher_in, char *key)
 {
@@ -1417,6 +1506,9 @@ static int crypt_ctr_cipher(struct dm_target *ti,
 	char *tmp, *cipher, *chainmode, *ivmode, *ivopts, *keycount;
 	char *cipher_api = NULL;
 	int cpu, ret = -EINVAL;
+
+	/* for benchmark only */
+	cipher_in = cipher_str;
 
 	/* Convert to crypto api definition? */
 	if (strchr(cipher_in, '(')) {
@@ -1473,10 +1565,10 @@ static int crypt_ctr_cipher(struct dm_target *ti,
 		ivmode = "plain";
 	}
 
-	if (strcmp(chainmode, "ecb") && !ivmode) {
-		ti->error = "IV mechanism required";
-		return -EINVAL;
-	}
+	/* if (strcmp(chainmode, "ecb") && !ivmode) { */
+		/* ti->error = "IV mechanism required"; */
+		/* return -EINVAL; */
+	/* } */
 
 	cipher_api = kmalloc(CRYPTO_MAX_ALG_NAME, GFP_KERNEL);
 	if (!cipher_api)

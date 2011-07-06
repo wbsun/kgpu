@@ -33,6 +33,7 @@ struct gaes_ecb_data {
     u32 *d_key;
     u32 *h_key;
     int nrounds;
+    int nr_dblks_per_tblk;
 };
 
 struct gaes_ctr_data {
@@ -41,6 +42,7 @@ struct gaes_ctr_data {
     u8 *d_ctr;
     u8 *h_ctr;
     int nrounds;
+    int nr_dblks_per_tblk;
 };
 
 static void dump_hex(u8* p, int rs, int cs)

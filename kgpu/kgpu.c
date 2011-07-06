@@ -250,10 +250,11 @@ int free_gpu_buffer(struct kgpu_buffer *buf)
 	/KGPU_BUF_UNIT_SIZE;
 
     spin_lock(&(kgpudev.buflock));
-
     bitmap_clear(mbuf->bitmap, idx, nr);    
-
     spin_unlock(&(kgpudev.buflock));
+
+    kmem_cache_free(kgpu_allocated_buf_cache, abuf);
+    
     return 1;
 }
 EXPORT_SYMBOL_GPL(free_gpu_buffer);

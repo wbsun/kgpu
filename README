@@ -29,10 +29,7 @@ As for copyright license, we use GPLv2.
 
 News:
 
-* dm-crypt can use gaes_ecb or gaes_ctr directly, although you won't get
-  correct data. Speedup is similar to ecryptfs. So just for performance.
-
-  
+* dm-crypt can use gaes_ecb or gaes_ctr directly.  
 
 Try it?
 
@@ -75,10 +72,13 @@ Make and Run it:
      OK, now KGPU is and the GPU-cipher is fine and helper is running.
      If you want to use eCryptfs, keep helper running, open
      another terminal or console in current directory:
-     sudo rmmod ecryptfs && sudo insmod service/gaes/ecryptfs/ecryptfs.ko
+     sudo rmmod ecryptfs && sudo insmod services/gaes/ecryptfs/ecryptfs.ko
 
      Then mount you eCryptfs partition. To use GPU cipher, you should
      use AES with 16Byte key.
+
+     NOTE: DO NOT USE THIS ECRYPTS FOR IMPORTANT DATA!!!
+           THIS IS NOT COMPATIBLE WITH THE VANILLA ECRYPTFS.
 
      To stop it:
      Umount your eCryptfs partition and:

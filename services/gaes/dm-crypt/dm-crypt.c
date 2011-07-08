@@ -773,8 +773,8 @@ static int crypt_convert_blocks(struct crypt_config *cc,
     dmreq->ctx = ctx;
     iv = iv_of_dmreq(cc, dmreq);
 
-    printk("[dm-crypt] Info: convert %u blocks\n",
-	ctx->bio_in->bi_vcnt);
+    /* printk("[dm-crypt] Info: convert %u blocks\n", */
+	/* ctx->bio_in->bi_vcnt); */
 
     sgin = kmalloc(
 	(ctx->bio_in->bi_vcnt+ctx->bio_out->bi_vcnt)*
@@ -1175,7 +1175,7 @@ static void kcryptd_crypt_write_convert(struct dm_crypt_io *io)
 	/*
 	 * Log record size of each IO request
 	 */
-	printk("dm-crypt: write size: %u\n", remaining);
+	/* printk("dm-crypt: write size: %u\n", remaining); */
 
 	/*
 	 * Prevent io from disappearing until this function completes.
@@ -1273,7 +1273,7 @@ static void kcryptd_crypt_read_convert(struct dm_crypt_io *io)
 	/*
 	 * Log read record size:
 	 */
-	printk("dm-crypt: read size %u\n", io->base_bio->bi_size);
+	/* printk("dm-crypt: read size %u\n", io->base_bio->bi_size); */
 
 	crypt_inc_pending(io);
 
@@ -1424,19 +1424,25 @@ static int crypt_setkey_allcpus(struct crypt_config *cc)
 static int crypt_set_key(struct crypt_config *cc, char *key)
 {
 	/* The key size may not be changed. */
-	if (cc->key_size != (strlen(key) >> 1))
-		return -EINVAL;
+    if (cc->key_size != (strlen(key) >> 1)) {
+	printk("key size error: %d %d\n", cc->key_size, strlen(key));
+	return -EINVAL;
+    }
 
-	/* Hyphen (which gives a key_size of zero) means there is no key. */
-	if (!cc->key_size && strcmp(key, "-"))
-		return -EINVAL;
+    /* Hyphen (which gives a key_size of zero) means there is no key. */
+    if (!cc->key_size && strcmp(key, "-")) {
+	printk("key empty error: %s\n", key);
+	return -EINVAL;
+    }
 
-	if (cc->key_size && crypt_decode_key(cc->key, key, cc->key_size) < 0)
-		return -EINVAL;
+    if (cc->key_size && crypt_decode_key(cc->key, key, cc->key_size) < 0) {
+	printk("decode key error: %s %d\n", key, cc->key_size);
+	return -EINVAL;
+    }
 
-	set_bit(DM_CRYPT_KEY_VALID, &cc->flags);
-
-	return crypt_setkey_allcpus(cc);
+    set_bit(DM_CRYPT_KEY_VALID, &cc->flags);
+    
+    return crypt_setkey_allcpus(cc);
 }
 
 static int crypt_wipe_key(struct crypt_config *cc)
@@ -1497,7 +1503,7 @@ static void crypt_dtr(struct dm_target *ti)
 	kzfree(cc);
 }
 
-static char *cipher_str = "aes-ecb";
+static char *cipher_str = "aes-gaes_ecb";
 
 static int crypt_ctr_cipher(struct dm_target *ti,
 			    char *cipher_in, char *key)
@@ -1508,7 +1514,7 @@ static int crypt_ctr_cipher(struct dm_target *ti,
 	int cpu, ret = -EINVAL;
 
 	/* for benchmark only */
-	cipher_in = cipher_str;
+	/* cipher_in = cipher_str; */
 
 	/* Convert to crypto api definition? */
 	if (strchr(cipher_in, '(')) {

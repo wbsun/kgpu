@@ -19,6 +19,26 @@ __device__ int thread_id()
     return block_id()*(blockDim.x*blockDim.y) + threadIdx.y*blockDim.x + threadIdx.x;
 }
 
+
+/*
+ * Not used yet, just in case.
+ * Code borrowed from:
+ *   http://stackoverflow.com/questions/6162140/128-bit-integer-on-cuda/6220499#6220499
+ */
+__device__ uint4 add_uint128 (uint4 addend, uint4 augend)
+{
+    uint4 res;
+    asm ("add.cc.u32      %0, %4, %8;\n\t"
+	 "addc.cc.u32     %1, %5, %9;\n\t"
+	 "addc.cc.u32     %2, %6, %10;\n\t"
+	 "addc.u32        %3, %7, %11;\n\t"
+	 : "=r"(res.x), "=r"(res.y), "=r"(res.z), "=r"(res.w)
+	 : "r"(addend.x), "r"(addend.y), "r"(addend.z), "r"(addend.w),
+	   "r"(augend.x), "r"(augend.y), "r"(augend.z), "r"(augend.w));
+    return res;
+}
+
+
 /*
  * deal with lower 64bit only
  */

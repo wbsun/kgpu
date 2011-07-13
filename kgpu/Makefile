@@ -1,12 +1,12 @@
-obj-m += kgpu_km.o
+obj-m += kgpu.o
 
-all:	km helper
+all:	kgpu helper
 
-kgpu_km-objs := kgpu.o kgpu_kutils.o kgpu_log.o
+kgpu-objs := main.o kgpu_kutils.o kgpu_log.o
 
-km:
+kgpu:
 	make -C /lib/modules/$(shell uname -r)/build M=`pwd` modules
-	$(if $(BUILD_DIR), cp kgpu_km.ko $(BUILD_DIR)/ ) 
+	$(if $(BUILD_DIR), cp kgpu.ko $(BUILD_DIR)/ ) 
 
 kgpu_log:
 	gcc -O2 -D__KGPU__ -c kgpu_log.c -o kgpu_log_user.o

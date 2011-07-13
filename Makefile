@@ -1,5 +1,4 @@
-# fill this later
-SUBDIRS = kgpu services
+SUBDIRS = kgpu services scripts
 
 all: $(SUBDIRS)
 

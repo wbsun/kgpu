@@ -1,0 +1,7 @@
+#!/bin/sh
+
+insmod ./kgpu.ko &&
+modprobe aes &&
+insmod ./gaes_ecb.ko &&
+insmod ./gaes_ctr.ko &&
+./helper -l `pwd`

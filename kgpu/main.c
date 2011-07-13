@@ -27,13 +27,14 @@
 #include <linux/poll.h>
 #include <linux/slab.h>
 #include <linux/bitmap.h>
+#include <linux/device.h>
 #include <asm/atomic.h>
 #include "kkgpu.h"
 
-#define KGPU_MAJOR 0
-
 struct kgpu_dev {
     struct cdev cdev;
+    struct class *cls;
+    dev_t devno;
 
     struct kgpu_mgmt_buffer mgmt_bufs[KGPU_BUF_NR];
     spinlock_t buflock;
@@ -53,7 +54,6 @@ struct kgpu_dev {
 
 static atomic_t kgpudev_av = ATOMIC_INIT(1);
 static struct kgpu_dev kgpudev;
-static int kgpu_major;
 
 struct sync_call_data {
 	wait_queue_head_t queue;
@@ -521,8 +521,7 @@ struct file_operations kgpu_ops =  {
 
 int kgpu_init(void)
 {
-    int result;
-    dev_t dev = 0;
+    int result = 0;
     int devno;
     
     INIT_LIST_HEAD(&(kgpudev.reqs));
@@ -568,22 +567,38 @@ int kgpu_init(void)
     /* initialize buffer info */
     memset(kgpudev.mgmt_bufs, 0, sizeof(struct kgpu_mgmt_buffer)*KGPU_BUF_NR);
 
+    /* dev class */
+    kgpudev.cls = class_create(THIS_MODULE, "KGPU_DEV_NAME");
+    if (IS_ERR(kgpudev.cls)) {
+	result = PTR_ERR(kgpudev.cls);
+	kgpu_log(KGPU_LOG_ERROR, "can't create dev class for KGPU\n");
+	return result;
+    }
+
     /* alloc dev */	
-    result = alloc_chrdev_region(&dev, 0, 1, KGPU_DEV_NAME);
-    kgpu_major = MAJOR(dev);
+    result = alloc_chrdev_region(&kgpudev.devno, 0, 1, KGPU_DEV_NAME);
+    devno = MAJOR(kgpudev.devno);
+    kgpudev.devno = MKDEV(devno, 0);
 
     if (result < 0) {
         kgpu_log(KGPU_LOG_ERROR, "can't get major\n");
     } else {
-	kgpu_log(KGPU_LOG_PRINT, "major %d\n", kgpu_major);
-	devno = MKDEV(kgpu_major, 0);
+	struct device *device;
 	memset(&kgpudev.cdev, 0, sizeof(struct cdev));
 	cdev_init(&kgpudev.cdev, &kgpu_ops);
 	kgpudev.cdev.owner = THIS_MODULE;
 	kgpudev.cdev.ops = &kgpu_ops;
-	result = cdev_add(&kgpudev.cdev, devno, 1);
+	result = cdev_add(&kgpudev.cdev, kgpudev.devno, 1);
 	if (result) {
 	    kgpu_log(KGPU_LOG_ERROR, "can't add device %d", result);
+	}
+
+	/* create /dev/kgpu */
+	device = device_create(kgpudev.cls, NULL, kgpudev.devno, NULL,
+			       KGPU_DEV_NAME);
+	if (IS_ERR(device)) {
+	    kgpu_log(KGPU_LOG_ERROR, "creating device failed\n");
+	    result = PTR_ERR(device);
 	}
     }
 
@@ -594,10 +609,12 @@ EXPORT_SYMBOL_GPL(kgpu_init);
 void kgpu_cleanup(void)
 {
     int i;
-    dev_t devno = MKDEV(kgpu_major, 0);
-    cdev_del(&kgpudev.cdev);
 
-    unregister_chrdev_region(devno, 1);
+    device_destroy(kgpudev.cls, kgpudev.devno);
+    cdev_del(&kgpudev.cdev);
+    class_destroy(kgpudev.cls);
+
+    unregister_chrdev_region(kgpudev.devno, 1);
     if (kgpu_req_cache)
 	kmem_cache_destroy(kgpu_req_cache);
     if (kgpu_resp_cache)

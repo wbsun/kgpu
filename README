@@ -1,91 +1,80 @@
-KGPU - Augmenting Linux with GPUs
+
+     KGPU - Augmenting Linux with GPUs
 
 
 What is it?
 
-Treating the GPU as a computing co-processor. To enable the data-parallel 
-computation inside the Linux kernel. Using SIMD (or SIMT in CUDA) style code to
- accelerate Linux kernel functionality.
+     Treating the GPU as a computing co-processor. To enable the
+     data-parallel computation inside the Linux kernel. Using SIMD (or
+     SIMT in CUDA) style code to accelerate Linux kernel
+     functionality.
 
-Make the Linux kernel really parallelized: which is not only processing 
-multiple requests concurrently, but can also partition a single large 
-requested computation into tiles and do them on GPU cores.
+     Make the Linux kernel really parallelized: which is not only
+     processing multiple requests concurrently, but can also partition
+     a single large requested computation into tiles and do them on
+     GPU cores.
 
-GPU can give the OS kernel dedicated cores that can be fully occupied by the 
-kernel. But the multicore CPUs should not be occupied by the kernel because 
-other tasks also need them.
+     GPU can give the OS kernel dedicated cores that can be fully
+     occupied by the kernel. But the multicore CPUs should not be
+     occupied by the kernel because other tasks also need them.
 
-KGPU is not an OS running on GPU, which is almost impossible because of the 
-limited functionality of current GPU architectures. KGPU tries to enable 
-vector computing for the kernel.
+     KGPU is not an OS running on GPU, which is almost impossible
+     because of the limited functionality of current GPU
+     architectures. KGPU tries to enable vector computing for the
+     kernel.
 
-*To access the code, using git to clone: git@github.com:wbsun/kgpu.git 
-or goto https://github.com/wbsun/kgpu .*
+     *To access the code, using git to clone:
+     git@github.com:wbsun/kgpu.git or goto
+     https://github.com/wbsun/kgpu .*
 
+     As for copyright license, we use GPLv2.
 
-As for copyright license, we use GPLv2.
+News
 
-
-
-News:
-
-* dm-crypt can use gaes_ecb or gaes_ctr directly.  
+	* Scripts to run and stop kgpu.
+	* Simple build system.
+	* dm-crypt can use gaes_ecb or gaes_ctr directly.
 
 Try it?
 
-Hardware:
-	We use GTX480. You don't need such high-end video card, but
-	you should have a NVIDIA card that support CUDA computing
-	capability 2.0 or higher.
-	If you don't have more than 512M video memory, change
-	KGPU_BUF_NR and KGPU_BUF_SIZE in kgpu/kgpu.h to make sure
-	KGPU_BUF_NR*KGPU_BUF_SIZE < Size of Your Video Memory - (x)
-	where the max of x is a value that you need try some times
-	to figure out. Or simply leave x = 64M or 128M.
+    Hardware:
+	We use GTX480. You don't need such high-end video
+    	card, but you should have a NVIDIA card that support CUDA
+    	computing capability 2.0 or higher.  If you don't have more
+    	than 1G video memory, change KGPU_BUF_SIZE in kgpu/kgpu.h to
+    	make sure KGPU_BUF_NR*KGPU_BUF_SIZE < Size of Your Video
+    	Memory - (x) where the max of x is a value that you need try
+    	some times to figure out. Or simply leave x = 64M or 128M.
 
-Software:
-	We compile the CUDA code with nvcc in CUDA 3.2. The OS kernel
-	is vanilla Linux 2.6.38. You need a 64bit linux kernel compiled
-	targeting at x86_64!
+    Software:
+        We compile the CUDA code with nvcc in CUDA 3.2. The OS
+	kernel is vanilla Linux 2.6.38. You need a 64bit linux kernel
+	compiled targeting at x86_64!
 
-Make and Run it:
-     Check out the code from Github or download the archive from Google
-     Code and extract files into say kgpu directory:
-     cd kgpu
-     cd kgpu && make all && cd -
-     cd services/gaes/gaes_ecb/ && make all && cd -
-     cd services/gaes/libsrv_gaes && make all && cd -
-     cd services/gaes/ecryptfs && make all && cd -
-     cd kgpu && sudo insmod kgpu.ko && cd -
+    Make and Run it:
+        Check out the code from Github or download the
+        archive from Google Code and extract files into say kgpu
+        directory:
+	    cd kgpu && make all
+		
+	Now all outputs are in build directory. To run it:
+	    cd build && sudo ./runkgpu
+
+	This only starts KGPU module, helper and loads AES ciphers.
+	To use modified eCryptfs and dm-crypt, in the build directory:
+	    sudo insmod ./ecryptfs.ko && sudo insmod ./dm-crypt
      
-     STOP here, you need do dmesg to check what device numbers kgpu got.
-     By doing: dmesg | tail -n 10, you'll find such line:
-     "[kgpu] Info: major <xxx>" where <xxx> is number, say 250.
-     Then you create a device file in /dev by doing:
-     sudo mknod /dev/kgpu c <xxx> 0
-     <xxx> is the number in the line outputed by dmesg.
-     
-     Then:
-     sudo insmod services/gaes/gaes_ecb/gaes_ecb.ko
-     sudo kgpu/helper -l <absolute-path-of-current-dir>/services/gaes/libsrv_gaes
 
-     OK, now KGPU is and the GPU-cipher is fine and helper is running.
-     If you want to use eCryptfs, keep helper running, open
-     another terminal or console in current directory:
-     sudo rmmod ecryptfs && sudo insmod services/gaes/ecryptfs/ecryptfs.ko
+        NOTE: DO NOT USE THIS ECRYPTS FOR IMPORTANT DATA!!!
+              THIS IS NOT COMPATIBLE WITH THE VANILLA ECRYPTFS.
+	      SAME CARE SHOULD BE TAKEN WITH DM-CRYPT.
+	      
+    To stop it:
+        Umount your eCryptfs partition, delete dm-crypt mappers and:
+        sudo rmmod ecryptfs && sudo rmmod dm-crypt
+        Stop "helper" program by Ctrl-C
+        sudo ./stopkgpu (in build/)
 
-     Then mount you eCryptfs partition. To use GPU cipher, you should
-     use AES with 16Byte key.
-
-     NOTE: DO NOT USE THIS ECRYPTS FOR IMPORTANT DATA!!!
-           THIS IS NOT COMPATIBLE WITH THE VANILLA ECRYPTFS.
-
-     To stop it:
-     Umount your eCryptfs partition and:
-     sudo rmmod ecryptfs
-     Stop "helper" program.
-     sudo rmmod gaes && sudo rmmod kgpu     
-     
 
 Weibin Sun, Xing Lin
 {wbsun, xinglin}@cs.utah.edu

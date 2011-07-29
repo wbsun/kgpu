@@ -58,6 +58,7 @@ struct ku_response {
 #define KGPU_IOC_SET_GPU_BUFS _IOW(KGPU_IOC_MAGIC, 1, struct gpu_buffer[KGPU_BUF_NR])
 #define KGPU_IOC_GET_GPU_BUFS _IOR(KGPU_IOC_MAGIC, 2, struct gpu_buffer[KGPU_BUF_NR])
 #define KGPU_IOC_SET_STOP     _IO(KGPU_IOC_MAGIC, 3)
+#define KGPU_IOC_GET_REQS     _IOR(KGPU_IOC_MAGIC, 4, 
 
 #define KGPU_IOC_MAXNR 4
 

@@ -1,4 +1,4 @@
-SUBDIRS = libsrv_raid6
+SUBDIRS = libsrv_raid6 gpq
 
 all: $(SUBDIRS)
 

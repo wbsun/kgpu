@@ -9,3 +9,16 @@
 #include <stdlib.h>
 #include <cuda.h>
 
+#define PAGE_SIZE 4096
+#define NDISKS 6
+
+char *data[NDISKS*PAGE_SIZE];
+
+static void makedata(void)
+{
+    int i;
+
+    for (i=0; i<NDISKS*PAGE_SIZE; i++)
+	data[i] = rand();
+}
+

@@ -10,6 +10,7 @@
 #include <cuda.h>
 #include "../../../kgpu/kgpu.h"
 #include "../../../kgpu/gputils.h"
+#include "../gpq.h"
 
 #define SECTOR_SIZE 512
 #define BYTES_PER_THREAD 8
@@ -17,12 +18,6 @@
 #define THREADS_PER_BLOCK (BYTES_PER_BLOCK/BYTES_PER_THREAD)
 
 struct service raid6_pq_srv;
-
-/*  may not need this */
-struct raid6_pq_data {
-    unsigned long dsize;
-    unsigned int nr_d;
-};
 
 /*
  * Include device code
@@ -47,7 +42,7 @@ int raid6_pq_prepare(struct service_request *sr)
     cudaStream_t s = (cudaStream_t)(sr->stream);
 
     sr->data = data;
-    csc( ah2dcpy( sr->dinput, sr->kureq.input, sr->kureq.insize, s) );
+    csc( ah2dcpy( sr->dinput, sr->kureq.input, data->dsize*(data->nr_d-2), s) );
 
     return 0;
 }
@@ -57,14 +52,17 @@ int raid6_pq_launch(struct service_request *sr)
     struct raid6_pq_data* data = (struct raid6_pq_data*)sr->data;
     cudaStream_t s = (cudaStream_t)(sr->stream);
 
-    raid6_pq<<<dim3(sr->grid_x, sr->grid_y), dim3(sr->block_x, sr->block_y),
-	s>>>(sr->dinput, sr->doutput, data->dsize, data->nr_d);
+    raid6_pq<<<dim3(sr->grid_x, sr->grid_y), dim3(sr->block_x, sr->block_y), 0,
+	s>>>((unsigned int)data->nr_d, (unsigned long)data->dsize, (u8*)sr->dinput);
     return 0;
 }
 
 int raid6_pq_post(struct service_request *sr)
 {
+    // struct raid6_pq_data* data = (struct raid6_pq_data*)sr->data;
     cudaStream_t s = (cudaStream_t)(sr->stream);
+
+    /* kureq.outsize should be 2*data->dsize */
     csc( ad2hcpy( sr->kureq.output, sr->doutput, sr->kureq.outsize, s ) );
 
     sr->data = NULL;

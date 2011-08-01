@@ -12,19 +12,22 @@
  * To be included by others.
  */
 
+typedef unsigned long u64;
+typedef unsigned char u8;
+
 #define NBYTES(x) ((x) * 0x0101010101010101UL)
 #define NSIZE  8
 #define NSHIFT 3
 
 #define SHLBYTE(v) (((v)<<1)&NBYTES(0xfe))
-#define MASK(v) { u64 vv = (v)&NBYTES(0x80); (vv<<1)-(vv>>7);}
+#define MASK(v) ({ u64 vv = (v)&NBYTES(0x80); (vv<<1)-(vv>>7);})
 
 /*
  * @disks: number of disks, p and q included
  * @dsize: unit size, or a stripe?
  * @data: disk data 
  */
-__kernel__ void raid6_pq(int disks, unsigend long dsize, u8 *data)
+__global__ void raid6_pq(unsigned int disks, unsigned long dsize, u8 *data)
 {
     u64 *d = (u64*)data;
     int z0, offset64, step64, tid;
@@ -54,14 +57,14 @@ __kernel__ void raid6_pq(int disks, unsigend long dsize, u8 *data)
  * accessed only once.
  *
  */
-__kernel__ void raid6_pq_fd6(int disks, unsigend long dsize, u8 *data)
+__global__ void raid6_pq_fd6(unsigned int disks, unsigned long dsize, u8 *data)
 {
     u64 *d = (u64*)data;
     int z0, offset64, step64, tid;
 
     u64 wq0, wp0;
 
-    __shared__ u64 dsk[4][THREAD_PER_BLOCK];
+    __shared__ u64 dsk[4][THREADS_PER_BLOCK];
 
     tid = blockDim.x*blockIdx.x+threadIdx.x;
     step64 = dsize/sizeof(u64);

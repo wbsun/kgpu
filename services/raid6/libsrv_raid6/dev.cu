@@ -53,9 +53,6 @@ __global__ void raid6_pq(unsigned int disks, unsigned long dsize, u8 *data)
  * Fixed number of disks version
  * Naming: _fdx, where x is the number of disks, including p and q.
  *
- * shared memory seems not a necessary trick because every datum is
- * accessed only once.
- *
  */
 __global__ void raid6_pq_fd6(unsigned int disks, unsigned long dsize, u8 *data)
 {
@@ -64,32 +61,27 @@ __global__ void raid6_pq_fd6(unsigned int disks, unsigned long dsize, u8 *data)
 
     u64 wq0, wp0;
 
-    __shared__ u64 dsk[4][THREADS_PER_BLOCK];
-
     tid = blockDim.x*blockIdx.x+threadIdx.x;
     step64 = dsize/sizeof(u64);
-    d = ((u64*)data)+tid;
+    d = ((u64*)data)+tid+3*step64;
     
-    dsk[0][threadIdx.x] = *d;
-    d += step64;
-    dsk[1][threadIdx.x] = *d;
-    d += step64;
-    dsk[2][threadIdx.x] = *d;
-    d += step64;
-    dsk[3][threadIdx.x] = *d;
-    d += step64;
+    wq0 = wp0 = *d;
+    d -= step64;
     
-    wq0 = wp0 = dsk[3][threadIdx.x];
+    wp0 ^= *d;
+    wq0 =
+	SHLBYTE(wq0) ^ (MASK(wq0)&NBYTES(0x1d)) ^ *d;
+    d-= step64;
     
-    wp0 ^= dsk[2][threadIdx.x];
+    wp0 ^= *d;
     wq0 =
-	SHLBYTE(wq0) ^ (MASK(wq0)&NBYTES(0x1d)) ^ dsk[2][threadIdx.x];
-    wp0 ^= dsk[1][threadIdx.x];
+	SHLBYTE(wq0) ^ (MASK(wq0)&NBYTES(0x1d)) ^ *d;
+    d -= step64;
+    
+    wp0 ^= *d;
     wq0 =
-	SHLBYTE(wq0) ^ (MASK(wq0)&NBYTES(0x1d)) ^ dsk[1][threadIdx.x];
-    wp0 ^= dsk[0][threadIdx.x];
-    wq0 =
-	SHLBYTE(wq0) ^ (MASK(wq0)&NBYTES(0x1d)) ^ dsk[0][threadIdx.x];
+	SHLBYTE(wq0) ^ (MASK(wq0)&NBYTES(0x1d)) ^ *d;
+    d += 4*step64;
     
     *d = wp0;
     *(d+step64) = wq0;

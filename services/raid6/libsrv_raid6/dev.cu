@@ -59,8 +59,8 @@ __global__ void raid6_pq(unsigned int disks, unsigned long dsize, u8 *data)
  */
 __global__ void raid6_pq_fd6(unsigned int disks, unsigned long dsize, u8 *data)
 {
-    u64 *d = (u64*)data;
-    int z0, offset64, step64, tid;
+    u64 *d;;
+    int step64, tid;
 
     u64 wq0, wp0;
 
@@ -68,20 +68,29 @@ __global__ void raid6_pq_fd6(unsigned int disks, unsigned long dsize, u8 *data)
 
     tid = blockDim.x*blockIdx.x+threadIdx.x;
     step64 = dsize/sizeof(u64);
-    offset64 = step64*3+tid;
+    d = ((u64*)data)+tid;
     
-    // __syncthreads();
-    for (z0=3; z0>=0; z0--) {
-	dsk[z0][threadIdx.x] = d[offset64];
-	offset64 -= step64;
-    }
+    dsk[0][threadIdx.x] = *d;
+    d += step64;
+    dsk[1][threadIdx.x] = *d;
+    d += step64;
+    dsk[2][threadIdx.x] = *d;
+    d += step64;
+    dsk[3][threadIdx.x] = *d;
+    d += step64;
     
     wq0 = wp0 = dsk[3][threadIdx.x];
-    for (z0=2; z0>=0; z0--) {
-	wp0 ^= dsk[z0][threadIdx.x];
-	wq0 =
-	    SHLBYTE(wq0) ^ (MASK(wq0)&NBYTES(0x1d)) ^ dsk[z0][threadIdx.x];
-    }
-    d[step64*4+tid] = wp0;
-    d[step64*5+tid] = wq0;    
+    
+    wp0 ^= dsk[2][threadIdx.x];
+    wq0 =
+	SHLBYTE(wq0) ^ (MASK(wq0)&NBYTES(0x1d)) ^ dsk[2][threadIdx.x];
+    wp0 ^= dsk[1][threadIdx.x];
+    wq0 =
+	SHLBYTE(wq0) ^ (MASK(wq0)&NBYTES(0x1d)) ^ dsk[1][threadIdx.x];
+    wp0 ^= dsk[0][threadIdx.x];
+    wq0 =
+	SHLBYTE(wq0) ^ (MASK(wq0)&NBYTES(0x1d)) ^ dsk[0][threadIdx.x];
+    
+    *d = wp0;
+    *(d+step64) = wq0;
 }

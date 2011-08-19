@@ -43,9 +43,9 @@ struct kgpu_dev {
     spinlock_t ridlock;
 
     struct list_head reqs;
-    struct list_head resps;
+    /* struct list_head resps; */
     spinlock_t reqlock;
-    spinlock_t resplock;
+    /* spinlock_t resplock; */
     wait_queue_head_t reqq;
 
     struct list_head rtdreqs;
@@ -164,6 +164,18 @@ static void kgpu_req_constructor(void* data)
     }
 }
 
+int init_kgpu_request(struct kgpu_req *req)
+{
+    if (req) {
+	memset(req, 0, sizeof(struct kgpu_req));
+	req->kureq.id = next_kgpu_request_id();
+	INIT_LIST_HEAD(&req->list);
+	req->kureq.sname[0] = 0;
+    }
+    return 0;
+}
+EXPORT_SYMBOL_GPL(init_kgpu_request);
+
 struct kgpu_req* alloc_kgpu_request(void)
 {
     struct kgpu_req *req = kmem_cache_alloc(kgpu_req_cache, GFP_KERNEL);    
@@ -186,6 +198,17 @@ static void kgpu_resp_constructor(void *data)
 	INIT_LIST_HEAD(&resp->list);
     }
 }
+
+int init_kgpu_response(struct kgpu_resp* resp)
+{
+    if (resp) {
+	memset(resp, 0, sizeof(struct kgpu_resp));
+	resp->kuresp.errcode = KGPU_NO_RESPONSE;
+	INIT_LIST_HEAD(&resp->list);
+    }
+    return 0;
+}
+EXPORT_SYMBOL_GPL(init_kgpu_response);
 
 struct kgpu_resp* alloc_kgpu_response(void)
 {
@@ -525,11 +548,11 @@ int kgpu_init(void)
     int devno;
     
     INIT_LIST_HEAD(&(kgpudev.reqs));
-    INIT_LIST_HEAD(&(kgpudev.resps));
+    /* INIT_LIST_HEAD(&(kgpudev.resps)); */
     INIT_LIST_HEAD(&(kgpudev.rtdreqs));
     
     spin_lock_init(&(kgpudev.reqlock));
-    spin_lock_init(&(kgpudev.resplock));
+    /* spin_lock_init(&(kgpudev.resplock)); */
     spin_lock_init(&(kgpudev.rtdreqlock));
 
     init_waitqueue_head(&(kgpudev.reqq));

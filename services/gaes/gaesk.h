@@ -12,8 +12,8 @@
 
 #include "gaes_common.h"
 
-#define GAES_ECB_SIZE_THRESHOLD (PAGE_SIZE)
-#define GAES_CTR_SIZE_THRESHOLD (PAGE_SIZE)
+#define GAES_ECB_SIZE_THRESHOLD (PAGE_SIZE*2)
+#define GAES_CTR_SIZE_THRESHOLD (PAGE_SIZE*2)
 
 
 /* only take the low-64bit for adding */

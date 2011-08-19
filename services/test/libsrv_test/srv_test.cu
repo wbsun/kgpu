@@ -54,7 +54,7 @@ struct service test_srv;
 
 extern "C" int init_service(void *lh, int (*reg_srv)(struct service*, void*))
 {
-    printf("init test service\n");
+    printf("[libsrv_test] Info: init test service\n");
     
     sprintf(test_srv.name, "test_service");
     test_srv.sid = 0;
@@ -68,6 +68,6 @@ extern "C" int init_service(void *lh, int (*reg_srv)(struct service*, void*))
 
 extern "C" int finit_service(void *lh, int (*unreg_srv)(const char*))
 {
-    printf("finit test service\n");
+    printf("[libsrv_test] Info: finit test service\n");
     return unreg_srv(test_srv.name);
 }

@@ -142,6 +142,9 @@ extern int free_gpu_buffer(struct kgpu_buffer *);
 extern void free_kgpu_response(struct kgpu_resp*);
 extern void free_kgpu_request(struct kgpu_req*);
 
+extern int init_kgpu_request(struct kgpu_req*);
+extern int init_kgpu_response(struct kgpu_resp*);
+
 #endif /* __KERNEL__ */
 
 #endif

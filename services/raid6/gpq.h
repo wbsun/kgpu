@@ -12,4 +12,10 @@ struct raid6_pq_data {
     unsigned int nr_d;
 };
 
+/*
+ * Not that efficient, but can save some time because
+ * we can allocate disk pointers statically.
+ */
+#define MAX_DISKS 16
+
 #endif

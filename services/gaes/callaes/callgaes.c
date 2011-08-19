@@ -18,17 +18,20 @@
 #include <linux/jiffies.h>
 #include <linux/timex.h>
 
-#define AES_GENERIC "ctr(aes-generic)"
-#define AES_ASM "ctr(aes-asm)"
+char* AES_GENERIC = "ecb(aes-generic)";
+char* AES_ASM = "ecb(aes-asm)";
+char* AES = "ecb(aes)";
 
-#define AES_GPU "gaes_lctr(aes-generic)"
+char* AES_GPU_GENERIC = "gaes_ecb(aes-generic)";
+char* AES_GPU_ASM = "gaes_ecb(aes-asm)";
+char* AES_GPU = "gaes_ecb(aes)";
 
-#define CIPHER AES_GPU
+char* CIPHER;
 
-#define MAX_BLK_SIZE (16*1024)
-#define MIN_BLK_SIZE (16*1024)
+#define MAX_BLK_SIZE (64*1024)
+#define MIN_BLK_SIZE (1*1024)
 
-#define TEST_TIMES 1
+#define TEST_TIMES 100
 
 static void dump_page_content(u8 *p)
 {
@@ -144,14 +147,6 @@ void test_aes(void)
 		struct timeval t0, t1;
 		long int enc, dec;
 
-		memset(iv, 0, 32);
-		dump_hex(iv, 32);
-
-		dump_page_content(ins[0]);
-		dump_page_content(ins[1]);
-		dump_page_content(outs[0]);
-		dump_page_content(outs[1]);
-
 		do_gettimeofday(&t0);
 		for (j=0; j<TEST_TIMES; j++) {
 			ret = crypto_blkcipher_encrypt_iv(&desc, dst, src, bs);
@@ -163,15 +158,7 @@ void test_aes(void)
 		do_gettimeofday(&t1);
 		enc = 1000000*(t1.tv_sec-t0.tv_sec) + 
 			((int)(t1.tv_usec) - (int)(t0.tv_usec));
-		dump_page_content(ins[0]);
-		dump_page_content(ins[1]);
-		dump_page_content(outs[0]);
-		dump_page_content(outs[1]);
-		dump_hex(iv, 32);
 
-		memset(iv, 0, 32);
-		dump_hex(iv, 32);
-		
 		do_gettimeofday(&t0);
 		for (j=0; j<TEST_TIMES; j++) {
 			ret = crypto_blkcipher_decrypt_iv(&desc, src, dst, bs);
@@ -184,14 +171,8 @@ void test_aes(void)
 		dec = 1000000*(t1.tv_sec-t0.tv_sec) + 
 			((int)(t1.tv_usec) - (int)(t0.tv_usec));
 
-		dump_page_content(ins[0]);
-		dump_page_content(ins[1]);
-		dump_page_content(outs[0]);
-		dump_page_content(outs[1]);
-
-		dump_hex(iv, 32);
-		printk("Size %u, enc %ld, dec %ld\n",
-			bs, enc, dec);
+		printk("%25s: Size %u, enc %ld, dec %ld\n",
+		       CIPHER, bs, enc, dec);
 	}
 	
 	
@@ -214,7 +195,18 @@ out:
 static int __init taes_init(void)
 {
 	printk("test gaes loaded\n");
+	/* CIPHER = AES_GPU_ASM; */
+	/* test_aes(); */
+	CIPHER = AES_GPU_GENERIC;
 	test_aes();
+	/* CIPHER = AES_GPU; */
+	/* test_aes(); */
+	/* CIPHER = AES_ASM; */
+	/* test_aes(); */
+	CIPHER = AES_GENERIC;
+	test_aes();
+	/* CIPHER = AES; */
+	/* test_aes(); */
 	return 0;
 }
 

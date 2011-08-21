@@ -27,6 +27,10 @@
 #include "../../../kgpu/kgpu.h"
 #include "../gaesk.h"
 
+/* customized log function */
+#define g_log(level, ...) kgpu_do_log(level, "gaes_ctr", ##__VA_ARGS__)
+#define dbg(...) g_log(KGPU_LOG_DEBUG, ##__VA_ARGS__)
+
 struct crypto_ctr_ctx {
     struct crypto_cipher *child;
     struct crypto_gaes_ctr_info info;
@@ -52,8 +56,7 @@ static int _crypto_ctr_setkey(struct crypto_tfm *parent, const u8 *key,
 	    keylen = cfg->key_length;
 	    ctx->info.ctr_range = cfg->ctr_range;
 	    if (cfg->ctr_range > PAGE_SIZE) {
-		printk(
-		    "[gaes_ctr] Error: local counter range "
+		    g_log(KGPU_LOG_ERROR, "local counter range "
 		    "%u is larger than PAGE_SIZE!",
 		    cfg->ctr_range);
 		return -EINVAL;
@@ -218,8 +221,7 @@ crypto_ctr_crypt(struct blkcipher_desc *desc,
 
     if (walk.nbytes) {
 	if (ctx->info.ctr_range) {
-	    printk(
-		"[gaes_ctr] Warnning: We got a problem: "
+		g_log(KGPU_LOG_ALERT, "We got a problem: "
 		"the size of data, %u, is not a multiple of "
 		"block size ...", nbytes);
 	}
@@ -256,7 +258,7 @@ _crypto_gaes_ctr_crypt(
     
     buf = alloc_gpu_buffer(rsz+2*PAGE_SIZE);
     if (!buf) {
-	printk("[gaes_ctr] Error: GPU buffer is null.\n");
+	g_log(KGPU_LOG_ERROR, "GPU buffer is null.\n");
 	return -EFAULT;
     }
 	
@@ -316,7 +318,7 @@ _crypto_gaes_ctr_crypt(
 	
     if (call_gpu_sync(req, resp)) {
 	err = -EFAULT;
-	printk("[gaes_ctr] Error: callgpu error\n");
+	g_log(KGPU_LOG_ERROR, "callgpu error\n");
     } else {
 	cpdbytes = 0;
 	blkcipher_walk_init(&walk, dst, src, sz);
@@ -382,10 +384,10 @@ crypto_gaes_lctr_crypt(
     struct crypto_ctr_ctx *ctx = crypto_blkcipher_ctx(tfm);
     
     if (nbytes % ctx->info.ctr_range) {
-	printk("[gaes_ctr] Warnning: using local "
-	       "counter mode, but data size is not "
-	       "multiple of %u\n", ctx->info.ctr_range);
-	return crypto_ctr_crypt(desc, dst, src, nbytes);
+	    g_log(KGPU_LOG_ALERT, "using local "
+		  "counter mode, but data size is not "
+		  "multiple of %u\n", ctx->info.ctr_range);
+	    return crypto_ctr_crypt(desc, dst, src, nbytes);
     }		
     return _crypto_gaes_ctr_crypt(desc, dst, src, nbytes);
 }
@@ -512,6 +514,20 @@ static struct crypto_template crypto_lctr_tmpl = {
     .free = crypto_ctr_free,
     .module = THIS_MODULE,
 };
+
+#include "../gaes_test.c"
+
+long test_gaes_ctr(size_t sz)
+{
+    return test_gaes(sz, 1, "gaes_ctr(aes)");
+}
+EXPORT_SYMBOL_GPL(test_gaes_ctr);
+
+long test_gaes_lctr(size_t sz)
+{
+    return test_gaes(sz, 1, "gaes_lctr(aes)");
+}
+EXPORT_SYMBOL_GPL(test_gaes_lctr);
 
 static int __init crypto_ctr_module_init(void)
 {

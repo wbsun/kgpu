@@ -24,6 +24,9 @@
 #include "../../../kgpu/kgpu.h"
 #include "../gaesk.h"
 
+/* customized log function */
+#define g_log(level, ...) kgpu_do_log(level, "gaes_ecb", ##__VA_ARGS__)
+#define dbg(...) g_log(KGPU_LOG_DEBUG, ##__VA_ARGS__)
 
 struct crypto_gaes_ecb_ctx {
     struct crypto_cipher *child;
@@ -85,7 +88,7 @@ crypto_gaes_ecb_crypt(
     
     buf = alloc_gpu_buffer(rsz+2*PAGE_SIZE);
     if (!buf) {
-	printk("[gaes_ecb] Error: GPU buffer is null.\n");
+	g_log(KGPU_LOG_ERROR, "GPU buffer is null.\n");
 	return -EFAULT;
     }
 
@@ -136,7 +139,7 @@ crypto_gaes_ecb_crypt(
 
     if (call_gpu_sync(req, resp)) {
 	err = -EFAULT;
-	printk("[gaes_ecb] Error: callgpu error\n");
+	g_log(KGPU_LOG_ERROR, "callgpu error\n");
     } else {
 	cpdbytes = 0;
 	blkcipher_walk_init(&walk, dst, src, sz);
@@ -298,7 +301,7 @@ static struct crypto_instance *crypto_gaes_ecb_alloc(struct rtattr **tb)
 
     inst = crypto_alloc_instance("gaes_ecb", alg);
     if (IS_ERR(inst)) {
-	printk("[gaes_ecb] Error: cannot alloc crypto instance\n");
+	g_log(KGPU_LOG_ERROR, "cannot alloc crypto instance\n");
 	goto out_put_alg;
     }
 
@@ -337,6 +340,15 @@ static struct crypto_template crypto_gaes_ecb_tmpl = {
     .free = crypto_gaes_ecb_free,
     .module = THIS_MODULE,
 };
+
+#include "../gaes_test.c"
+
+long test_gaes_ecb(size_t sz, int enc)
+{
+    return test_gaes(sz, enc, "gaes_ecb(aes)");
+}
+EXPORT_SYMBOL_GPL(test_gaes_ecb);
+
 
 static int __init crypto_gaes_ecb_module_init(void)
 {

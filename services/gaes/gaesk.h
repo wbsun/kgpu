@@ -16,6 +16,11 @@
 #define GAES_CTR_SIZE_THRESHOLD (PAGE_SIZE*2)
 
 
+long test_gaes_ecb(size_t sz, int enc);
+long test_gaes_ctr(size_t sz);
+long test_gaes_lctr(size_t sz);
+
+
 /* only take the low-64bit for adding */
 static void big_u128_add(u8 *ctr, u64 offset, u8 *res)
 {
@@ -45,7 +50,7 @@ static void cvt_endian_u32(u32* buf, int n)
   }
 }
 
-
+#ifdef 0
 static void dump_page_content(u8 *p)
 {
     int r,c;
@@ -68,5 +73,6 @@ static void dump_hex(u8 *p, int r, int c)
 	printk("\n");
     }    
 }
+#endif /* test only */
 
 #endif

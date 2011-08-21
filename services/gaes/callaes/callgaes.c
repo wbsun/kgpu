@@ -33,6 +33,8 @@ char* CIPHER;
 
 #define TEST_TIMES 100
 
+#ifdef 0
+
 static void dump_page_content(u8 *p)
 {
     int r,c;
@@ -52,6 +54,8 @@ static void dump_hex(u8 *p, int sz)
 	printk("%02x ", p[i]);
     printk("\n");
 }
+
+#endif /* test only */
 
 void test_aes(void)
 {

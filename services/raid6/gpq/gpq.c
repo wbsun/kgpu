@@ -1,4 +1,5 @@
-/* This work is licensed under the terms of the GNU GPL, version 2.  See
+/*
+ * This work is licensed under the terms of the GNU GPL, version 2.  See
  * the GPL-COPYING file in the top-level directory.
  *
  * Copyright (c) 2010-2011 University of Utah and the Flux Group.
@@ -34,7 +35,10 @@ module_param(replace_global, int, 0);
 MODULE_PARM_DESC(replace_global, "replace global pq algorithm with gpq");
 
 module_param(use_hybrid, int, 0);
-MODULE_PARM_DESC(use_hybrid, "use hybrid pq computing, which uses both CPU and GPU");
+MODULE_PARM_DESC(use_hybrid,
+		 "use hybrid pq computing, which uses both CPU and GPU");
+
+static struct raid6_calls oldcall;
 
 static void make_load_policy(void)
 {
@@ -48,10 +52,14 @@ static size_t decide_gpu_load(int disks, size_t dsize)
 
 static void cpu_gen_syndrome(int disks, size_t dsize, void **dps)
 {
-    raid6_sse2x4.gen_syndrome(disks, dsize, dps);
+    if (replace_global) 
+	oldcall.gen_syndrome(disks, dsize, dps);
+    else
+	raid6_call.gen_syndrome(disks, dsize, dps);
 }
 
-static void end_syndrome_gen(int disks, size_t dsize, void **dps, struct kgpu_buffer* buf)
+static void end_syndrome_gen(
+    int disks, size_t dsize, void **dps, struct kgpu_buffer* buf)
 {
     int p, b;
     size_t cpsz;
@@ -66,11 +74,13 @@ static void end_syndrome_gen(int disks, size_t dsize, void **dps, struct kgpu_bu
     }
 }
 
-static int async_gpu_callback(struct kgpu_req *req, struct kgpu_resp *resp)
+static int async_gpu_callback(
+    struct kgpu_req *req, struct kgpu_resp *resp)
 {
     struct gpq_async_data *adata = (struct gpq_async_data*)req->data;
 
-    end_syndrome_gen(adata->disks, adata->dsize, adata->dps, adata->buf);
+    end_syndrome_gen(
+	adata->disks, adata->dsize, adata->dps, adata->buf);
 
     complete(adata->c);
 
@@ -105,12 +115,14 @@ static void gpu_gen_syndrome(
     req = alloc_kgpu_request();
     resp = alloc_kgpu_response();
     if (unlikely(!req || !resp)) {
-	gpq_log(KGPU_LOG_ERROR, "GPU request/response allocation failed\n");
+	gpq_log(KGPU_LOG_ERROR,
+		"GPU request/response allocation failed\n");
 	return;
     }
 
     if (unlikely(dsize%PAGE_SIZE)) {
-	gpq_log(KGPU_LOG_ERROR, "gpq only handle PAGE aligned memory\n");
+	gpq_log(KGPU_LOG_ERROR,
+		"gpq only handle PAGE aligned memory\n");
 	free_gpu_buffer(buf);
 	
 	return;
@@ -120,7 +132,9 @@ static void gpu_gen_syndrome(
 	for (b=0; b<disks-2; b++) {
 	    cpsz=0;
 	    while (cpsz < dsize) {
-		memcpy(__va(buf->pas[p]), (u8*)dps[b]+cpsz, PAGE_SIZE);
+		memcpy(
+		    __va(buf->pas[p]),
+		    (u8*)dps[b]+cpsz, PAGE_SIZE);
 		p++;
 		cpsz += PAGE_SIZE;
 	    }
@@ -140,9 +154,11 @@ static void gpu_gen_syndrome(
     data->nr_d = disks;
 
     if (c) {
-	struct gpq_async_data *adata = kmalloc(sizeof(struct gpq_async_data), GFP_KERNEL);
+	struct gpq_async_data *adata =
+	    kmalloc(sizeof(struct gpq_async_data), GFP_KERNEL);
 	if (!adata) {
-	    gpq_log(KGPU_LOG_ERROR, "out of memory for gpq async data\n");
+	    gpq_log(KGPU_LOG_ERROR,
+		    "out of memory for gpq async data\n");
 	} else {	    
 	    req->cb = async_gpu_callback;
 	    req->data = adata;
@@ -200,14 +216,49 @@ const struct raid6_calls raid6_gpq = {
     0
 };
 
-static struct raid6_calls oldcall;
+#include <linux/timex.h>
+
+long test_gpq(int disks, size_t dsize)
+{
+    struct timeval t0, t1;
+    long t;
+    int i;
+    void **dps = kmalloc(sizeof(void*)*disks, GFP_KERNEL);
+    char *data = kmalloc(disks*dsize);
+
+    if (!data || !dps) {
+	gpq_log(KGPU_LOG_ERROR,
+		"out of memory for gpq test\n");
+	if (dps) kfree(dps);
+	if (data) kfree(data);
+	return 0;
+    }
+
+    for (i=0; i<disks; i++) {
+	dps[i] = data + i*dsize;
+    }
+
+    do_gettimeofday(&t0);
+    raid6_gpq.gpq_gen_syndrome(disks, dsize, dps);
+    do_gettimeofday(&t1);
+
+    t = 1000000*(t1.tv_sec-t0.tv_sec) +
+	((int)(t1.tv_usec) - (int)(t0.tv_usec));
+
+    kfree(dps);
+    kfree(data);
+
+    return t;
+}
+EXPORT_SYMBOL_GPL(test_gpq);
 
 static int __init raid6_gpq_init(void)
 {
     if (replace_global) {
 	oldcall = raid6_call;
 	raid6_call = raid6_gpq;
-	gpq_log(KGPU_LOG_PRINT, "global pq algorithm replaced with gpq\n");
+	gpq_log(KGPU_LOG_PRINT,
+		"global pq algorithm replaced with gpq\n");
     }
     if (use_hybrid) {
 	make_load_policy();

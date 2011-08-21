@@ -18,4 +18,6 @@ struct raid6_pq_data {
  */
 #define MAX_DISKS 16
 
+long test_gpq(int disks, int dsize);
+
 #endif

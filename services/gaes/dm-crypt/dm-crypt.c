@@ -694,6 +694,7 @@ static u8 *iv_of_dmreq(struct crypt_config *cc,
 		crypto_ablkcipher_alignmask(any_tfm(cc)) + 1);
 }
 
+#if 0
 /*
  * Deprecated
  */
@@ -751,6 +752,8 @@ static int crypt_convert_block(struct crypt_config *cc,
 
 	return r;
 }
+
+#endif /* replaced by the following one */
 
 /*
  * For KGPU: convert all blocks together for speedup
@@ -1425,7 +1428,7 @@ static int crypt_set_key(struct crypt_config *cc, char *key)
 {
 	/* The key size may not be changed. */
     if (cc->key_size != (strlen(key) >> 1)) {
-	printk("key size error: %d %d\n", cc->key_size, strlen(key));
+	printk("key size error: %d %lu\n", cc->key_size, strlen(key));
 	return -EINVAL;
     }
 
@@ -1503,7 +1506,7 @@ static void crypt_dtr(struct dm_target *ti)
 	kzfree(cc);
 }
 
-static char *cipher_str = "aes-gaes_ecb";
+/* static char *cipher_str = "aes-gaes_ecb"; */
 
 static int crypt_ctr_cipher(struct dm_target *ti,
 			    char *cipher_in, char *key)

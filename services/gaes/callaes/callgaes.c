@@ -33,7 +33,7 @@ char* CIPHER;
 
 #define TEST_TIMES 100
 
-#ifdef 0
+#if 0
 
 static void dump_page_content(u8 *p)
 {

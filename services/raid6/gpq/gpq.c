@@ -224,7 +224,7 @@ long test_gpq(int disks, size_t dsize)
     long t;
     int i;
     void **dps = kmalloc(sizeof(void*)*disks, GFP_KERNEL);
-    char *data = kmalloc(disks*dsize);
+    char *data = kmalloc(disks*dsize, GFP_KERNEL);
 
     if (!data || !dps) {
 	gpq_log(KGPU_LOG_ERROR,
@@ -239,7 +239,7 @@ long test_gpq(int disks, size_t dsize)
     }
 
     do_gettimeofday(&t0);
-    raid6_gpq.gpq_gen_syndrome(disks, dsize, dps);
+    raid6_gpq.gen_syndrome(disks, dsize, dps);
     do_gettimeofday(&t1);
 
     t = 1000000*(t1.tv_sec-t0.tv_sec) +

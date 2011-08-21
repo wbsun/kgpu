@@ -45,6 +45,7 @@ struct gaes_ctr_data {
     int nr_dblks_per_tblk;
 };
 
+#if 0
 static void dump_hex(u8* p, int rs, int cs)
 {
     int r,c;
@@ -56,6 +57,7 @@ static void dump_hex(u8* p, int rs, int cs)
 	printf("\n");
     }
 }
+#endif /* test only */
 
 /*
  * Include device code

@@ -29,7 +29,7 @@ static long test_gaes(size_t sz, int enc, const char *cipher)
 		0x06, 0x07, 0x08, 0x0A, 0x0B,
 		0x0C, 0x0D, 0x0F, 0x10, 0x11, 0x12};
 
-    npages = DIV_ROUND_UP(s, PAGE_SIZE);
+    npages = DIV_ROUND_UP(sz, PAGE_SIZE);
     mpool = kmalloc(
 	npages*2*(sizeof(struct scatterlist)+sizeof(char*))+32,
 	__GFP_ZERO|GFP_KERNEL);
@@ -40,9 +40,9 @@ static long test_gaes(size_t sz, int enc, const char *cipher)
 
     src = (struct scatterlist*)mpool;
     dst = (struct scatterlist*)mpool+npages*sizeof(struct scatterlist);
-    ins = mpool + 2*npages*sizeof(struct scatterlist);
-    outs = ins + npages*sizeof(char*);
-    iv = outs + npages*sizeof(char*);
+    ins = (char**)(mpool + 2*npages*sizeof(struct scatterlist));
+    outs = (char**)(ins + npages);
+    iv = ((char*)outs) + npages*sizeof(char*);
 
     tfm = crypto_alloc_blkcipher(cipher, 0, 0);
     if (IS_ERR(tfm)) {

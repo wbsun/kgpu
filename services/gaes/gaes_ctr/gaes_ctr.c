@@ -37,6 +37,16 @@ struct crypto_ctr_ctx {
     u8 key[AES_MAX_KEY_SIZE];	
 };
 
+/* only take the low-64bit for adding */
+static void big_u128_add(u8 *ctr, u64 offset, u8 *res)
+{
+    u64 c = be64_to_cpu(*(u64*)(ctr+8));
+
+    c += offset;
+    *(u64*)(res) = *(u64*)(ctr);
+    *(u64*)(res+8) = cpu_to_be64(c);
+}
+
 static int _crypto_ctr_setkey(struct crypto_tfm *parent, const u8 *key,
 			     unsigned int keylen, int use_lctr)
 {

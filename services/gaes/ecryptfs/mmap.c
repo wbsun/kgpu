@@ -87,6 +87,7 @@ out:
 	return rc;
 }
 
+#if 0
 /*
  * Inspired by write_cache_pages from /mm/page-writeback.c
  */
@@ -266,6 +267,7 @@ continue_unlock:
 
 	return ret;
 }
+#endif /* not needed */
 
 static void strip_xattr_flag(char *page_virt,
 			     struct ecryptfs_crypt_stat *crypt_stat)
@@ -454,7 +456,7 @@ static int ecryptfs_readpages(struct file *filp, struct address_space *mapping,
 	unsigned int page_idx = 0;
 	int rc = 0;
 	int nodec = 0;	//no decryption needed flag
-	u32 sz = 0; 
+	/* u32 sz = 0;  */
 
 	if (!crypt_stat
 	    || !(crypt_stat->flags & ECRYPTFS_ENCRYPTED)

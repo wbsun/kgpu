@@ -28,10 +28,10 @@ char* AES_GPU = "gaes_ecb(aes)";
 
 char* CIPHER;
 
-#define MAX_BLK_SIZE (64*1024)
-#define MIN_BLK_SIZE (1*1024)
+#define MAX_BLK_SIZE (1*1024*1024)
+#define MIN_BLK_SIZE (4*1024)
 
-#define TEST_TIMES 100
+#define TEST_TIMES 1
 
 #if 0
 
@@ -56,6 +56,7 @@ static void dump_hex(u8 *p, int sz)
 }
 
 #endif /* test only */
+
 
 void test_aes(void)
 {
@@ -147,7 +148,7 @@ void test_aes(void)
 		sg_set_buf(dst+i, buf, PAGE_SIZE);
 	}
 	
-	for (bs = MAX_BLK_SIZE; bs >= MIN_BLK_SIZE; bs>>=1) {
+	for (bs = MAX_BLK_SIZE; bs >= MIN_BLK_SIZE; bs-=PAGE_SIZE) {
 		struct timeval t0, t1;
 		long int enc, dec;
 

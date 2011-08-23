@@ -106,6 +106,9 @@ static void gpu_gen_syndrome(
     struct kgpu_resp *resp;
     struct kgpu_buffer *buf;
 
+    int p=0, b;
+    size_t cpsz;
+
     buf = alloc_gpu_buffer(rsz);
     if (unlikely(!buf)) {
 	gpq_log(KGPU_LOG_ERROR, "GPU buffer allocation failed\n");
@@ -126,21 +129,19 @@ static void gpu_gen_syndrome(
 	free_gpu_buffer(buf);
 	
 	return;
-    } else {
-	int p=0, b;
-	size_t cpsz;
-	for (b=0; b<disks-2; b++) {
-	    cpsz=0;
-	    while (cpsz < dsize) {
-		memcpy(
-		    __va(buf->pas[p]),
-		    (u8*)dps[b]+cpsz, PAGE_SIZE);
-		p++;
-		cpsz += PAGE_SIZE;
-	    }
-	}
     }
 
+    for (b=0; b<disks-2; b++) {
+	cpsz=0;
+	while (cpsz < dsize) {
+	    memcpy(
+		__va(buf->pas[p]),
+		(u8*)dps[b]+cpsz, PAGE_SIZE);
+	    p++;
+	    cpsz += PAGE_SIZE;
+	}
+    }
+    
     strcpy(req->kureq.sname, "raid6_pq");
     req->kureq.input     = buf->va;
     req->kureq.output    = (u8*)(buf->va)+dsize*(disks-2);
@@ -149,7 +150,7 @@ static void gpu_gen_syndrome(
     req->kureq.data      = (u8*)(buf->va)+dsize*disks;
     req->kureq.datasize  = sizeof(struct raid6_pq_data);
 
-    data = req->kureq.data;
+    data = __va(buf->pas[p]);;
     data->dsize = dsize;
     data->nr_d = disks;
 
@@ -218,7 +219,7 @@ const struct raid6_calls raid6_gpq = {
 
 #include <linux/timex.h>
 
-long test_gpq(int disks, size_t dsize)
+static long test_pq(int disks, size_t dsize, const struct raid6_calls *rc)
 {
     struct timeval t0, t1;
     long t;
@@ -228,7 +229,8 @@ long test_gpq(int disks, size_t dsize)
 
     if (!data || !dps) {
 	gpq_log(KGPU_LOG_ERROR,
-		"out of memory for gpq test\n");
+		"out of memory for %s test\n",
+		rc->name);
 	if (dps) kfree(dps);
 	if (data) kfree(data);
 	return 0;
@@ -239,7 +241,7 @@ long test_gpq(int disks, size_t dsize)
     }
 
     do_gettimeofday(&t0);
-    raid6_gpq.gen_syndrome(disks, dsize, dps);
+    rc->gen_syndrome(disks, dsize, dps);
     do_gettimeofday(&t1);
 
     t = 1000000*(t1.tv_sec-t0.tv_sec) +
@@ -250,7 +252,43 @@ long test_gpq(int disks, size_t dsize)
 
     return t;
 }
+
+long test_gpq(int disks, size_t dsize)
+{
+    return test_pq(disks, dsize, &raid6_gpq);
+}
 EXPORT_SYMBOL_GPL(test_gpq);
+
+long test_cpq(int disks, size_t dsize)
+{
+    return test_pq(disks, dsize, replace_global? &oldcall:&raid6_call);
+}
+EXPORT_SYMBOL_GPL(test_cpq);
+
+static void do_benchmark(void)
+{
+    int TEST_NDISKS=8;
+    size_t sz;
+    const struct raid6_calls *ccall, *gcall;
+
+    if (replace_global)
+	ccall = &oldcall;
+    else
+	ccall = &raid6_call;
+
+    gcall = &raid6_gpq;
+
+    /* init CUDA context */
+    test_gpq(TEST_NDISKS, PAGE_SIZE);
+
+    for (sz = (1024*1024); sz >= (1024*128); sz-=(1024*128))
+    {
+        printk("PQ Size: %10lu, CPU: %10lu, GPU: %10lu\n",
+	       sz*TEST_NDISKS,
+	       test_cpq(TEST_NDISKS, sz),
+	       test_gpq(TEST_NDISKS, sz));
+    }
+}
 
 static int __init raid6_gpq_init(void)
 {
@@ -263,6 +301,8 @@ static int __init raid6_gpq_init(void)
     if (use_hybrid) {
 	make_load_policy();
     }
+
+    do_benchmark();
     
     return 0;
 }

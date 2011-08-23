@@ -9,5 +9,8 @@ testlib: testlib.cu
 	nvcc -arch=sm_20 -O2 --shared --compiler-options '-fPIC' -o libcudapq.so testlib.cu
 	$(if $(BUILD_DIR), cp libcudapq.so $(BUILD_DIR)/ )
 
+test: test.c testlib
+	gcc -O2 -Wl,-rpath=./ -L. -lcudapq test.c -o test
+
 clean:
 	rm -f *.o *.so

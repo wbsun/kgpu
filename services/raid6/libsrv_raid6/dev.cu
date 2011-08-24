@@ -86,3 +86,36 @@ __global__ void raid6_pq_fd6(unsigned int disks, unsigned long dsize, u8 *data)
     *d = wp0;
     *(d+step64) = wq0;
 }
+
+/*
+ * PQ with stride
+ * @disks: number of disks, p and q included
+ * @dsize: unit size, or a stripe?
+ * @data: disk data 
+ */
+__global__ void raid6_pq_str(unsigned int disks, unsigned long dsize, u8 *data, unsigned int stride)
+{
+    u64 *d = (u64*)data;
+    int z0, offset64, step64, tid, i;
+
+    u64 wd0, wq0, wp0;
+    
+    tid = blockDim.x*blockIdx.x+threadIdx.x;
+    step64 = dsize/(sizeof(u64));
+    z0 = disks-3;
+    
+    for (i=0; i<stride; i++) 
+    {
+        offset64 = step64*z0+tid*stride+i;
+    
+        wq0 = wp0 = d[offset64];
+        for (offset64 -= step64; offset64>=0; offset64 -=step64) {
+	    wd0 = d[offset64];
+	    wp0 ^= wd0;
+	    wq0 = SHLBYTE(wq0) ^ (MASK(wq0)&NBYTES(0x1d)) ^ wd0;
+        }
+        d[step64*(z0+1)+tid*stride+i] = wp0;
+        d[step64*(z0+2)+tid*stride+i] = wq0;
+    }
+        
+}

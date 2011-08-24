@@ -26,7 +26,7 @@ struct service raid6_pq_srv;
 
 int raid6_pq_compute_size(struct service_request *sr)
 {
-    struct raid6_pq_data* data = (struct raid6_pq_data*)(sr->kureq.data);
+    struct raid6_pq_data* data = (struct raid6_pq_data*)(((char*)(sr->kureq.output))+sr->kureq.outsize);
     sr->data = data;
     
     sr->block_x = THREADS_PER_BLOCK;
@@ -41,7 +41,7 @@ int raid6_pq_prepare(struct service_request *sr)
 {
     struct raid6_pq_data* data = (struct raid6_pq_data*)(sr->data);
     cudaStream_t s = (cudaStream_t)(sr->stream);
-
+  
     csc( ah2dcpy( sr->dinput, sr->kureq.input, data->dsize*(data->nr_d-2), s) );
 
     return 0;

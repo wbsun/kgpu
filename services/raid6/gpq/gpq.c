@@ -136,7 +136,7 @@ static void gpu_gen_syndrome(
 	while (cpsz < dsize) {
 	    memcpy(
 		__va(buf->pas[p]),
-		(u8*)dps[b]+cpsz, PAGE_SIZE);
+		((u8*)dps[b])+cpsz, PAGE_SIZE);
 	    p++;
 	    cpsz += PAGE_SIZE;
 	}
@@ -144,15 +144,15 @@ static void gpu_gen_syndrome(
     
     strcpy(req->kureq.sname, "raid6_pq");
     req->kureq.input     = buf->va;
-    req->kureq.output    = (u8*)(buf->va)+dsize*(disks-2);
+    req->kureq.output    = ((u8*)(buf->va))+dsize*(disks-2);
     req->kureq.insize    = rsz;
     req->kureq.outsize   = dsize*2;
     req->kureq.data      = (u8*)(buf->va)+dsize*disks;
     req->kureq.datasize  = sizeof(struct raid6_pq_data);
 
-    data = __va(buf->pas[p]);;
-    data->dsize = dsize;
-    data->nr_d = disks;
+    data = __va(buf->pas[(dsize*disks)>>PAGE_SHIFT]);
+    data->dsize = (unsigned long)dsize;
+    data->nr_d = (unsigned int)disks;
 
     if (c) {
 	struct gpq_async_data *adata =
@@ -173,7 +173,7 @@ static void gpu_gen_syndrome(
 	    call_gpu(req, resp);
 	}
     } else {
-	if (unlikely(call_gpu_sync(req, resp))) {
+	if (call_gpu_sync(req, resp)) {
 	    gpq_log(KGPU_LOG_ERROR, "callgpu failed\n");
 	} else {
 	    end_syndrome_gen(disks, dsize, dps, buf);
@@ -267,7 +267,7 @@ EXPORT_SYMBOL_GPL(test_cpq);
 
 static void do_benchmark(void)
 {
-    int TEST_NDISKS=8;
+    int TEST_NDISKS=32;
     size_t sz;
     const struct raid6_calls *ccall, *gcall;
 
@@ -280,10 +280,12 @@ static void do_benchmark(void)
 
     /* init CUDA context */
     test_gpq(TEST_NDISKS, PAGE_SIZE);
+    gpq_log(KGPU_LOG_PRINT, "init CUDA done\n");
 
-    for (sz = (1024*1024); sz >= (1024*128); sz-=(1024*128))
+    for (sz = (16*1024); sz >= (1024*4); sz-=(1024*4))
     {
-        printk("PQ Size: %10lu, CPU: %10lu, GPU: %10lu\n",
+        gpq_log(KGPU_LOG_PRINT,
+		"PQ Size: %10lu, CPU: %10lu, GPU: %10lu\n",
 	       sz*TEST_NDISKS,
 	       test_cpq(TEST_NDISKS, sz),
 	       test_gpq(TEST_NDISKS, sz));

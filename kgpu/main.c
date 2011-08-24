@@ -255,6 +255,8 @@ struct kgpu_buffer* alloc_gpu_buffer(unsigned long nbytes)
 				   +(idx*KGPU_BUF_UNIT_SIZE));
 	    
 	    return &(abuf->buf);
+	} else {
+	    kgpu_log(KGPU_LOG_ERROR, "out of GPU memory for buf request %lu\n", nbytes);
 	}
     }
 

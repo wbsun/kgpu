@@ -14,7 +14,7 @@
 
 #define SECTOR_SIZE 512
 #define BYTES_PER_THREAD 8
-#define BYTES_PER_BLOCK SECTOR_SIZE
+#define BYTES_PER_BLOCK (SECTOR_SIZE*8)
 #define THREADS_PER_BLOCK (BYTES_PER_BLOCK/BYTES_PER_THREAD)
 
 struct service raid6_pq_srv;
@@ -53,7 +53,8 @@ int raid6_pq_launch(struct service_request *sr)
     cudaStream_t s = (cudaStream_t)(sr->stream);
 
     raid6_pq<<<dim3(sr->grid_x, sr->grid_y), dim3(sr->block_x, sr->block_y), 0,
-	s>>>((unsigned int)data->nr_d, (unsigned long)data->dsize, (u8*)sr->dinput);
+      s>>>((unsigned int)data->nr_d, (unsigned long)data->dsize, (u8*)sr->dinput);
+      
     return 0;
 }
 

@@ -22,7 +22,7 @@
  * Buffer management stuff, put them here in case we may
  * create a kgpu_buf.c for buffer related functions.
  */
-#define KGPU_BUF_UNIT_SIZE (128*1024)
+#define KGPU_BUF_UNIT_SIZE (1024*1024)
 #define KGPU_BUF_NR_FRAMES_PER_UNIT (KGPU_BUF_UNIT_SIZE/PAGE_SIZE)
 
 struct kgpu_mgmt_buffer {

@@ -15,7 +15,7 @@
 
 #include "dev.cu"
 
-#define NSTREAM 1
+#define NSTREAM 8
 
 extern "C" void cuda_gen_syndrome(int disks, unsigned long dsize, void**dps, int stride)
 {
@@ -64,11 +64,12 @@ extern "C" void cuda_gen_syndrome(int disks, unsigned long dsize, void**dps, int
      *
      * for testing: data not copied here
      */
-     /*for (i=0;i<disks-2;i++) {
+     for(j=0; j<NSTREAM; j++)
+     for (i=0;i<disks-2;i++) {
 	   memcpy(hd+i*dsize, dps[i], dsize);
-     }*/
+     }
 
-    cudaEventRecord(st, 0);
+    //cudaEventRecord(st, 0);
     
     gettimeofday(&t2, NULL);
 
@@ -87,6 +88,7 @@ extern "C" void cuda_gen_syndrome(int disks, unsigned long dsize, void**dps, int
 	    cudaMemcpyDeviceToHost));*/
 
     /* kgpu could avoid this with async execution */
+    //cudaThreadSynchronize();
     cudaEventRecord(e,0);
     cudaEventSynchronize(e);
     
@@ -107,8 +109,9 @@ extern "C" void cuda_gen_syndrome(int disks, unsigned long dsize, void**dps, int
     for(i=0; i<NSTREAM; i++)
 	csc(cudaStreamDestroy(s[i]));
     
-    /*for(i=disks-2;i<disks;i++)
-	memcpy(dps[i], hd+i*dsize, dsize);*/
+    for (j=0;j<NSTREAM; j++)
+    for(i=disks-2;i<disks;i++)
+	memcpy(dps[i], hd+i*dsize, dsize);
     csc(cudaFree(dd));
     csc(cudaFreeHost(hd));
 }

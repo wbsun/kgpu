@@ -19,8 +19,10 @@ typedef unsigned char u8;
 #define NSIZE  8
 #define NSHIFT 3
 
-#define SHLBYTE(v) (((v)<<1)&NBYTES(0xfe))
-#define MASK(v) ({ u64 vv = (v)&NBYTES(0x80); (vv<<1)-(vv>>7);})
+#define SHLBYTE(v) (((v)<<1)&(0xfefefefefefefefe))
+//(((v)<<1)&NBYTES(0xfe))
+#define MASK(v) ({ u64 vv = (v)&(0x8080808080808080); (vv<<1)-(vv>>7); })
+
 
 /*
  * @disks: number of disks, p and q included
@@ -40,10 +42,11 @@ __global__ void raid6_pq(unsigned int disks, unsigned long dsize, u8 *data)
     offset64 = step64*z0+tid;
     
     wq0 = wp0 = d[offset64];
+    #pragma unroll 16
     for (offset64 -= step64; offset64>=0; offset64 -=step64) {
 	wd0 = d[offset64];
 	wp0 ^= wd0;
-	wq0 = SHLBYTE(wq0) ^ (MASK(wq0)&NBYTES(0x1d)) ^ wd0;
+	wq0 = SHLBYTE(wq0) ^ (MASK(wq0)&(0x1d1d1d1d1d1d1d1d)) ^ wd0;
     }
     d[step64*(z0+1)+tid] = wp0;
     d[step64*(z0+2)+tid] = wq0;    
@@ -104,11 +107,14 @@ __global__ void raid6_pq_str(unsigned int disks, unsigned long dsize, u8 *data, 
     step64 = dsize/(sizeof(u64));
     z0 = disks-3;
     
+    #pragma unroll 4
     for (i=0; i<stride; i++) 
     {
         offset64 = step64*z0+tid*stride+i;
     
         wq0 = wp0 = d[offset64];
+        
+        #pragma unroll 16
         for (offset64 -= step64; offset64>=0; offset64 -=step64) {
 	    wd0 = d[offset64];
 	    wp0 ^= wd0;

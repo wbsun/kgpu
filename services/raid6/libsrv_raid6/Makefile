@@ -13,4 +13,5 @@ test: test.c testlib
 	gcc -O2 -Wl,-rpath=./ -L. -lcudapq test.c -o test
 
 clean:
+	rm -f test
 	rm -f *.o *.so

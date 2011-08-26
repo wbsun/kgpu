@@ -31,7 +31,7 @@ extern "C" int post_finished(struct service_request *sreq);
 
 extern "C" unsigned long get_stream(int sid);
 
-#define MAX_STREAM_NR 4
+#define MAX_STREAM_NR 8
 static cudaStream_t streams[MAX_STREAM_NR];
 static int streamuses[MAX_STREAM_NR];
 

@@ -145,6 +145,9 @@ extern void free_kgpu_request(struct kgpu_req*);
 extern int init_kgpu_request(struct kgpu_req*);
 extern int init_kgpu_response(struct kgpu_resp*);
 
+extern void *kgpu_vmalloc(unsigned long nbytes);
+extern int kgpu_vfree(void* p);
+
 #endif /* __KERNEL__ */
 
 #endif

@@ -19,6 +19,7 @@
 #include <linux/kthread.h>
 #include <linux/proc_fs.h>
 #include <linux/mm.h>
+#include <linux/vmalloc.h>
 #include <linux/string.h>
 #include <linux/uaccess.h>
 #include <linux/wait.h>
@@ -30,6 +31,16 @@
 #include <linux/device.h>
 #include <asm/atomic.h>
 #include "kkgpu.h"
+
+struct g_mempool {
+    unsigned long uva;
+    unsigned long kva;
+    struct page **pages;
+    u32 npages;
+    u32 nunits;
+    unsigned long *bitmap;
+    u32           *alloc_sz;
+};
 
 struct kgpu_dev {
     struct cdev cdev;
@@ -50,6 +61,10 @@ struct kgpu_dev {
 
     struct list_head rtdreqs;
     spinlock_t rtdreqlock;
+
+    struct g_mempool gmpool;
+    spinlock_t gmpool_lock;
+	
 };
 
 static atomic_t kgpudev_av = ATOMIC_INIT(1);
@@ -222,6 +237,58 @@ void free_kgpu_response(struct kgpu_resp* resp)
     kmem_cache_free(kgpu_resp_cache, resp);
 }
 EXPORT_SYMBOL_GPL(free_kgpu_response);
+
+void* kgpu_vmalloc(unsigned long nbytes)
+{
+    unsigned int req_nunits = DIV_ROUND_UP(nbytes, KGPU_BUF_UNIT_SIZE);
+    void *p = NULL;
+    unsigned long idx;
+
+    spin_lock(&kgpudev.gmpool_lock);
+    idx = bitmap_find_next_zero_area(
+	kgpudev.gmpool.bitmap, kgpudev.gmpool.nunits, 0, req_nunits, 0);
+    if (idx < kgpudev.gmpool.nunits) {
+	bitmap_set(kgpudev.gmpool.bitmap, idx, req_nunits);
+	p = (void*)((unsigned long)(kgpudev.gmpool.kva)
+		    + idx*KGPU_BUF_UNIT_SIZE);
+	kgpudev.gmpool.alloc_sz[idx] = req_nunits;
+    } else {
+	kgpu_log(KGPU_LOG_ERROR, "out of GPU memory for malloc %lu\n",
+	    nbytes);
+    }
+
+    spin_unlock(&kgpudev.gmpool_lock);
+    return p;	
+}
+EXPORT_SYMBOL_GPL(kgpu_vmalloc);
+
+int kgpu_vfree(void *p)
+{
+    unsigned long idx =
+	((unsigned long)(p) - (unsigned long)(kgpudev.gmpool.kva))/KGPU_BUF_UNIT_SIZE;
+    unsigned int nunits;
+
+    if (idx < 0 || idx >= kgpudev.gmpool.nunits) {
+	kgpu_log(KGPU_LOG_ERROR, "incorrect GPU memory pointer 0x%lX to free\n",
+	    p);
+	return -EFAULT;
+    }
+
+    nunits = kgpudev.gmpool.alloc_sz[idx];
+    if (nunits == 0 || nunits > (kgpudev.gmpool.nunits - idx)) {
+	kgpu_log(KGPU_LOG_ERROR, "incorrect GPU memory allocation info: "
+		 "allocated %u units at unit index %u\n", nunits, idx);
+	return -EFAULT;
+    }
+
+    spin_lock(&kgpudev.gmpool_lock);
+    bitmap_clear(kgpudev.gmpool.bitmap, idx, nunits);
+    kgpudev.gmpool.alloc_sz[idx] = 0;
+    spin_unlock(&kgpudev.gmpool_lock);
+
+    return 0;    
+}
+EXPORT_SYMBOL_GPL(kgpu_vfree);
 
 static void kgpu_allocated_buf_constructor(void *data)
 {
@@ -429,6 +496,90 @@ ssize_t kgpu_write(struct file *filp, const char __user *buf,
     return ret;
 }
 
+static int clear_gpu_mempool(void)
+{
+    struct g_mempool *gmp = &kgpudev.gmpool;
+
+    spin_lock(&kgpudev.gmpool_lock);
+    if (gmp->pages)
+	kfree(gmp->pages);
+    if (gmp->bitmap)
+	kfree(gmp->bitmap);
+    if (gmp->alloc_sz)
+	kfree(gmp->alloc_sz);
+
+    vunmap((void*)gmp->kva);
+    spin_unlock(&kgpudev.gmpool_lock);
+    return 0;
+}
+
+static int set_gpu_mempool(char __user *buf)
+{
+    struct gpu_buffer gb;
+    struct g_mempool *gmp = &kgpudev.gmpool;
+    int i;
+    int err=0;
+
+    spin_lock(&(kgpudev.gmpool_lock));
+    
+    copy_from_user(&gb, buf, sizeof(struct gpu_buffer));
+
+    /* set up pages mem */
+    gmp->uva = (unsigned long)(gb.addr);
+    gmp->npages = gb.size/PAGE_SIZE;
+    if (!gmp->pages) {
+	gmp->pages = kmalloc(sizeof(struct page*)*gmp->npages, GFP_KERNEL);
+	if (!gmp->pages) {
+	    kgpu_log(KGPU_LOG_ERROR, "run out of memory for gmp pages\n");
+	    err = -ENOMEM;
+	    goto unlock_and_out;
+	}
+    }
+
+    for (i=0; i<gmp->npages; i++)
+	gmp->pages[i]= kgpu_v2page(
+	    (unsigned long)(gb.addr) + i*PAGE_SIZE
+	    );
+
+    /* set up bitmap */
+    gmp->nunits = gmp->npages/KGPU_BUF_NR_FRAMES_PER_UNIT;
+    if (!gmp->bitmap) {
+	gmp->bitmap = kmalloc(
+	    BITS_TO_LONGS(gmp->nunits)*sizeof(long), GFP_KERNEL);
+	if (!gmp->bitmap) {
+	    kgpu_log(KGPU_LOG_ERROR, "run out of memory for gmp bitmap\n");
+	    err = -ENOMEM;
+	    goto unlock_and_out;
+	}
+    }    
+    bitmap_zero(gmp->bitmap, gmp->nunits);
+
+    /* set up allocated memory sizes */
+    if (!gmp->alloc_sz) {
+	gmp->alloc_sz = kmalloc(
+	    gmp->nunits*sizeof(u32), GFP_KERNEL);
+	if (!gmp->alloc_sz) {
+	    kgpu_log(KGPU_LOG_ERROR, "run out of memory for gmp alloc_sz\n");
+	    err = -ENOMEM;
+	    goto unlock_and_out;
+	}
+    }
+    memset(gmp->alloc_sz, 0, gmp->nunits);
+
+    /* set up kernel remapping */
+    gmp->kva = (unsigned long)vmap(gmp->pages, gmp->npages, GFP_KERNEL, PAGE_KERNEL);
+    if (!gmp->kva) {
+	kgpu_log(KGPU_LOG_ERROR, "map pages into kernel failed\n");
+	err = -EFAULT;
+	goto unlock_and_out;
+    }
+    
+unlock_and_out:
+    spin_unlock(&(kgpudev.gmpool_lock));    
+
+    return err;
+}
+
 static int set_gpu_bufs(char __user *buf)
 {
     int off=0, i, j;
@@ -496,7 +647,7 @@ long kgpu_ioctl(struct file *filp,
     switch (cmd) {
 	
     case KGPU_IOC_SET_GPU_BUFS:
-	err = set_gpu_bufs((char*)arg);
+	err = set_gpu_mempool((char*)arg);
 	break;
 	
     case KGPU_IOC_GET_GPU_BUFS:
@@ -592,6 +743,8 @@ int kgpu_init(void)
     /* initialize buffer info */
     memset(kgpudev.mgmt_bufs, 0, sizeof(struct kgpu_mgmt_buffer)*KGPU_BUF_NR);
 
+    memset(&kgpudev.gmpool, 0, sizeof(struct g_mempool));
+
     /* dev class */
     kgpudev.cls = class_create(THIS_MODULE, "KGPU_DEV_NAME");
     if (IS_ERR(kgpudev.cls)) {
@@ -650,10 +803,14 @@ void kgpu_cleanup(void)
 
     /* clean up buffer info */
     for (i=0; i<KGPU_BUF_NR; i++) {
-	kfree(kgpudev.mgmt_bufs[i].bitmap);
-	kfree(kgpudev.mgmt_bufs[i].paddrs);
+	if (kgpudev.mgmt_bufs[i].bitmap)
+	    kfree(kgpudev.mgmt_bufs[i].bitmap);
+	if (kgpudev.mgmt_bufs[i].paddrs)
+	    kfree(kgpudev.mgmt_bufs[i].paddrs);
     }
     memset(kgpudev.mgmt_bufs, 0, sizeof(struct kgpu_mgmt_buffer)*KGPU_BUF_NR);
+
+    clear_gpu_mempool();
 }
 EXPORT_SYMBOL_GPL(kgpu_cleanup);
 

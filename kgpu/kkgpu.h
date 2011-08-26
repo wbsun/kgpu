@@ -40,6 +40,7 @@ struct kgpu_allocated_buffer {
 
 /* memory ops */
 extern unsigned long kgpu_virt2phy(unsigned long vaddr);
+extern struct page *kgpu_v2page(unsigned long vaddr);
 extern int
 kgpu_check_phy_consecutiveness(unsigned long vaddr, size_t sz, size_t framesz);
 extern void kgpu_dump_pages(unsigned long vaddr, unsigned long sz);

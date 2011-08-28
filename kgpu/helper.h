@@ -15,26 +15,26 @@
 #define kgpu_log(level, ...) kgpu_do_log(level, "helper", ##__VA_ARGS__)
 #define dbg(...) kgpu_log(KGPU_LOG_DEBUG, ##__VA_ARGS__)
 
-extern struct gpu_buffer hostbufs[KGPU_BUF_NR];
-extern struct gpu_buffer devbufs[KGPU_BUF_NR];
+extern struct kgpu_gpu_mem_info hostbufs[KGPU_BUF_NR];
+extern struct kgpu_gpu_mem_info devbufs[KGPU_BUF_NR];
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-    void init_gpu();
-    void finit_gpu();
+    void init_gpu(void);
+    void finit_gpu(void);
 
     void *alloc_pinned_mem(unsigned long size);
     void free_pinned_mem(void *p);
 
-    int alloc_gpu_mem(struct service_request *sreq);
-    void free_gpu_mem(struct service_request *sreq);
-    int alloc_stream(struct service_request *sreq);
-    void free_stream(struct service_request *sreq);
+    int alloc_gpu_mem(struct kgpu_service_request *sreq);
+    void free_gpu_mem(struct kgpu_service_request *sreq);
+    int alloc_stream(struct kgpu_service_request *sreq);
+    void free_stream(struct kgpu_service_request *sreq);
 
-    int execution_finished(struct service_request *sreq);
-    int post_finished(struct service_request *sreq);
+    int execution_finished(struct kgpu_service_request *sreq);
+    int post_finished(struct kgpu_service_request *sreq);
 
     unsigned long get_stream(int sid);
 

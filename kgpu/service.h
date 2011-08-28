@@ -10,13 +10,13 @@
 #ifndef __SERVICE_H__
 #define __SERVICE_H__
 
-struct service {
-    char name[SERVICE_NAME_SIZE];
+struct kgpu_service {
+    char name[KGPU_SERVICE_NAME_SIZE];
     int sid;
-    int (*compute_size)(struct service_request *sreq);
-    int (*launch)(struct service_request *sreq);
-    int (*prepare)(struct service_request *sreq);
-    int (*post)(struct service_request *sreq);
+    int (*compute_size)(struct kgpu_service_request *sreq);
+    int (*launch)(struct kgpu_service_request *sreq);
+    int (*prepare)(struct kgpu_service_request *sreq);
+    int (*post)(struct kgpu_service_request *sreq);
 };
 
 #define SERVICE_INIT "init_service"
@@ -24,20 +24,20 @@ struct service {
 #define SERVICE_LIB_PREFIX "libsrv_"
 
 typedef int (*fn_init_service)(
-    void* libhandle, int (*reg_srv)(struct service *, void*));
+    void* libhandle, int (*reg_srv)(struct kgpu_service *, void*));
 typedef int (*fn_finit_service)(
     void* libhandle, int (*unreg_srv)(const char*));
 
 
 #ifdef __KGPU__
 
-struct service * lookup_service(const char *name);
-int register_service(struct service *s, void *libhandle);
-int unregister_service(const char *name);
-int load_service(const char *libpath);
-int load_all_services(const char *libdir);
-int unload_service(const char *name);
-int unload_all_services();
+struct kgpu_service * kgpu_lookup_service(const char *name);
+int kgpu_register_service(struct kgpu_service *s, void *libhandle);
+int kgpu_unregister_service(const char *name);
+int kgpu_load_service(const char *libpath);
+int kgpu_load_all_services(const char *libdir);
+int kgpu_unload_service(const char *name);
+int kgpu_unload_all_services();
 
 #endif /* __KGPU__ */
 

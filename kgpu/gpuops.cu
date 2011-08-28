@@ -19,15 +19,13 @@ extern "C" void finit_gpu();
 extern "C" void *alloc_pinned_mem(unsigned long size);
 extern "C" void free_pinned_mem(void *p);
 
-extern "C" int alloc_gpu_mem(struct service_request *sreq);
-extern "C" void free_gpu_mem(struct service_request *sreq);
-extern "C" int alloc_stream(struct service_request *sreq);
-extern "C" void free_stream(struct service_request *sreq);
-//extern "C" struct service_request* alloc_service_request();
-//extern "C" void free_service_request(struct service_request *sreq);
+extern "C" int alloc_gpu_mem(struct kgpu_service_request *sreq);
+extern "C" void free_gpu_mem(struct kgpu_service_request *sreq);
+extern "C" int alloc_stream(struct kgpu_service_request *sreq);
+extern "C" void free_stream(struct kgpu_service_request *sreq);
 
-extern "C" int execution_finished(struct service_request *sreq);
-extern "C" int post_finished(struct service_request *sreq);
+extern "C" int execution_finished(struct kgpu_service_request *sreq);
+extern "C" int post_finished(struct kgpu_service_request *sreq);
 
 extern "C" unsigned long get_stream(int sid);
 
@@ -38,14 +36,14 @@ static int streamuses[MAX_STREAM_NR];
 static const dim3 default_block_size(32,1);
 static const dim3 default_grid_size(512,1);
 
-struct gpu_buffer devbufs[KGPU_BUF_NR];
+struct kgpu_gpu_mem_info devbufs[KGPU_BUF_NR];
 
 void init_gpu()
 {
     int i;
 
     for (i=0; i< KGPU_BUF_NR; i++) {
-	devbufs[i].addr = alloc_dev_mem(KGPU_BUF_SIZE);
+	devbufs[i].uva = alloc_dev_mem(KGPU_BUF_SIZE);
     }
 
     for (i=0; i<MAX_STREAM_NR; i++) {
@@ -59,7 +57,7 @@ void finit_gpu()
     int i;
 
     for (i=0; i<KGPU_BUF_NR; i++) {
-	free_dev_mem(devbufs[i].addr);
+	free_dev_mem(devbufs[i].uva);
     }
     for (i=0; i<MAX_STREAM_NR; i++) {
 	csc( cudaStreamDestroy(streams[i]));
@@ -95,13 +93,13 @@ static int __check_stream_done(cudaStream_t s)
     return 0;
 }
 
-int execution_finished(struct service_request *sreq)
+int execution_finished(struct kgpu_service_request *sreq)
 {
     cudaStream_t s = (cudaStream_t)get_stream(sreq->stream_id);
     return __check_stream_done(s);
 }
 
-int post_finished(struct service_request *sreq)
+int post_finished(struct kgpu_service_request *sreq)
 {
     cudaStream_t s = (cudaStream_t)get_stream(sreq->stream_id);
     return __check_stream_done(s);
@@ -118,20 +116,20 @@ int post_finished(struct service_request *sreq)
  *     service provider. This is fine since the data tend to be
  *     very tiny.
  */
-int alloc_gpu_mem(struct service_request *sreq)
+int alloc_gpu_mem(struct kgpu_service_request *sreq)
 {
     int i, oks=0;
-    unsigned long inaddr = (unsigned long)(sreq->kureq.input);
-    unsigned long outaddr = (unsigned long)(sreq->kureq.output);
+    unsigned long inaddr = (unsigned long)(sreq->hin);
+    unsigned long outaddr = (unsigned long)(sreq->hout);
 
     for (i=0; i<KGPU_BUF_NR; i++) {
-	unsigned long hostbase = (unsigned long)(hostbufs[i].addr);
-	unsigned long devbase = (unsigned long)(devbufs[i].addr);
+	unsigned long hostbase = (unsigned long)(hostbufs[i].uva);
+	unsigned long devbase = (unsigned long)(devbufs[i].uva);
 
 	// for input
         if (hostbase <= inaddr
-	    && hostbase + hostbufs[i].size >= inaddr + sreq->kureq.insize) {
-	    sreq->dinput = (void*)(devbase + (inaddr-hostbase));
+	    && hostbase + hostbufs[i].size >= inaddr + sreq->insize) {
+	    sreq->din = (void*)(devbase + (inaddr-hostbase));
 	    if (oks)
 		return 0;
 	    oks++;
@@ -139,8 +137,8 @@ int alloc_gpu_mem(struct service_request *sreq)
 
 	// for output
 	if (hostbase <= outaddr
-	    && hostbase + hostbufs[i].size >= outaddr + sreq->kureq.outsize) {
-	    sreq->doutput = (void*)(devbase + (outaddr-hostbase));
+	    && hostbase + hostbufs[i].size >= outaddr + sreq->outsize) {
+	    sreq->dout = (void*)(devbase + (outaddr-hostbase));
 	    if (oks)
 		return 0;
 	    oks++;
@@ -149,13 +147,13 @@ int alloc_gpu_mem(struct service_request *sreq)
     return 1;
 }
 
-void free_gpu_mem(struct service_request *sreq)
+void free_gpu_mem(struct kgpu_service_request *sreq)
 {
-    sreq->dinput = NULL;
-    sreq->doutput = NULL;
+    sreq->din = NULL;
+    sreq->dout = NULL;
 }
 
-int alloc_stream(struct service_request *sreq)
+int alloc_stream(struct kgpu_service_request *sreq)
 {
     int i;
 
@@ -170,7 +168,7 @@ int alloc_stream(struct service_request *sreq)
     return 1;
 }
 
-void free_stream(struct service_request *sreq)
+void free_stream(struct kgpu_service_request *sreq)
 {
     if (sreq->stream_id >= 0 && sreq->stream_id < MAX_STREAM_NR) {
 	streamuses[sreq->stream_id] = 0;
@@ -178,7 +176,7 @@ void free_stream(struct service_request *sreq)
 }
 
 
-int default_compute_size(struct service_request *sreq)
+int default_compute_size(struct kgpu_service_request *sreq)
 {
     sreq->block_x = default_block_size.x;
     sreq->block_y = default_block_size.y;
@@ -187,16 +185,16 @@ int default_compute_size(struct service_request *sreq)
     return 0;
 }
 
-int default_prepare(struct service_request *sreq)
+int default_prepare(struct kgpu_service_request *sreq)
 {
     cudaStream_t s = (cudaStream_t)get_stream(sreq->stream_id);
-    csc( ah2dcpy( sreq->dinput, sreq->kureq.input, sreq->kureq.insize, s) );
+    csc( ah2dcpy( sreq->din, sreq->hin, sreq->insize, s) );
     return 0;
 }
 
-int default_post(struct service_request *sreq)
+int default_post(struct kgpu_service_request *sreq)
 {
     cudaStream_t s = (cudaStream_t)get_stream(sreq->stream_id);
-    csc( ad2hcpy( sreq->kureq.output, sreq->doutput, sreq->kureq.outsize, s) );
+    csc( ad2hcpy( sreq->hout, sreq->dout, sreq->outsize, s) );
     return 0;
 }

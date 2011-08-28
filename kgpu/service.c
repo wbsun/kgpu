@@ -17,46 +17,46 @@
 #include "list.h"
 #include "helper.h"
 
-struct sitem {
-    struct service *s;
+struct _kgpu_sitem {
+    struct kgpu_service *s;
     void* libhandle;
     struct list_head list;
 };
 
 LIST_HEAD(services);
 
-static struct sitem *lookup_sitem(const char *name)
+static struct _kgpu_sitem *lookup_kgpu_sitem(const char *name)
 {
-    struct sitem *i;
+    struct _kgpu_sitem *i;
     struct list_head *e;
     
     if (!name)
 	return NULL;
 
     list_for_each(e, &services) {
-	i = list_entry(e, struct sitem, list);
-	if (!strncmp(name, i->s->name, SERVICE_NAME_SIZE))
+	i = list_entry(e, struct _kgpu_sitem, list);
+	if (!strncmp(name, i->s->name, KGPU_SERVICE_NAME_SIZE))
 	    return i;
     }
 
     return NULL;    
 }
 
-struct service *lookup_service(const char *name)
+struct kgpu_service *kgpu_lookup_service(const char *name)
 {
-    struct sitem *i = lookup_sitem(name);
+    struct _kgpu_sitem *i = lookup_kgpu_sitem(name);
     if (!i)
 	return NULL;
     return i->s;
 }
 
-int register_service(struct service *s, void *libhandle)
+int kgpu_register_service(struct kgpu_service *s, void *libhandle)
 {
-    struct sitem *i;
+    struct _kgpu_sitem *i;
 
     if (!s)
 	return 1;
-    i = (struct sitem *)malloc(sizeof(struct sitem));
+    i = (struct _kgpu_sitem *)malloc(sizeof(struct _kgpu_sitem));
     if (!i)
 	return 1;
 
@@ -69,7 +69,7 @@ int register_service(struct service *s, void *libhandle)
     return 0;
 }
 
-static int __unregister_service(struct sitem *i)
+static int __unregister_service(struct _kgpu_sitem *i)
 {
     if (!i)
 	return 1;
@@ -80,12 +80,12 @@ static int __unregister_service(struct sitem *i)
     return 0;
 }
 
-int unregister_service(const char *name)
+int kgpu_unregister_service(const char *name)
 {
-    return __unregister_service(lookup_sitem(name));    
+    return __unregister_service(lookup_kgpu_sitem(name));    
 }
 
-int load_service(const char *libpath)
+int kgpu_load_service(const char *libpath)
 {
     void *lh;
     fn_init_service init;
@@ -107,7 +107,7 @@ int load_service(const char *libpath)
 		    libpath, ((err=dlerror()) == NULL?"": err));
 	    dlclose(lh);
 	} else {
-	    if (init(lh, register_service))
+	    if (init(lh, kgpu_register_service))
 	    {
 		fprintf(stderr,
 			"Warning: %s failed to register service\n",
@@ -121,7 +121,7 @@ int load_service(const char *libpath)
     return r;
 }
 
-int load_all_services(const char *dir)
+int kgpu_load_all_services(const char *dir)
 {
     char path[256];
     int i;
@@ -136,14 +136,14 @@ int load_all_services(const char *dir)
     for (i=0; i<glb.gl_pathc; i++)
     {
 	libpath = glb.gl_pathv[i];
-	e += load_service(libpath);
+	e += kgpu_load_service(libpath);
     }
 
     globfree(&glb);
     return e;
 }
 
-static int __unload_service(struct sitem* i)
+static int __unload_service(struct _kgpu_sitem* i)
 {
     void *lh;
     fn_finit_service finit;
@@ -157,7 +157,7 @@ static int __unload_service(struct sitem* i)
 	finit = (fn_finit_service)dlsym(lh, SERVICE_FINIT);
 	if (finit)
 	{
-	    if (finit(lh, unregister_service))
+	    if (finit(lh, kgpu_unregister_service))
 	    {
 		fprintf(stderr,
 			"Warning: failed to unregister service %s\n",
@@ -178,18 +178,18 @@ static int __unload_service(struct sitem* i)
     return r;
 }
 
-int unload_service(const char *name)
+int kgpu_unload_service(const char *name)
 {
-    return __unload_service(lookup_sitem(name));
+    return __unload_service(lookup_kgpu_sitem(name));
 }
 
-int unload_all_services()
+int kgpu_unload_all_services()
 {
     struct list_head *p, *n;
     int e=0;
 
     list_for_each_safe(p, n, &services) {
-	e += __unload_service(list_entry(p, struct sitem, list));
+	e += __unload_service(list_entry(p, struct _kgpu_sitem, list));
     }
     return e;
 }

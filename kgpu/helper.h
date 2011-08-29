@@ -15,8 +15,8 @@
 #define kgpu_log(level, ...) kgpu_do_log(level, "helper", ##__VA_ARGS__)
 #define dbg(...) kgpu_log(KGPU_LOG_DEBUG, ##__VA_ARGS__)
 
-extern struct kgpu_gpu_mem_info hostbufs[KGPU_BUF_NR];
-extern struct kgpu_gpu_mem_info devbufs[KGPU_BUF_NR];
+extern struct kgpu_gpu_mem_info hostbuf;
+extern struct kgpu_gpu_mem_info devbuf;
 
 #ifdef __cplusplus
 extern "C" {

@@ -36,15 +36,15 @@ static int streamuses[MAX_STREAM_NR];
 static const dim3 default_block_size(32,1);
 static const dim3 default_grid_size(512,1);
 
-struct kgpu_gpu_mem_info devbufs[KGPU_BUF_NR];
+struct kgpu_gpu_mem_info devbuf;
 
 void init_gpu()
 {
     int i;
 
-    for (i=0; i< KGPU_BUF_NR; i++) {
-	devbufs[i].uva = alloc_dev_mem(KGPU_BUF_SIZE);
-    }
+    // for (i=0; i< KGPU_BUF_NR; i++) {
+	devbuf.uva = alloc_dev_mem(KGPU_BUF_SIZE);
+    // }
 
     for (i=0; i<MAX_STREAM_NR; i++) {
         csc( cudaStreamCreate(&streams[i]) );
@@ -56,9 +56,9 @@ void finit_gpu()
 {
     int i;
 
-    for (i=0; i<KGPU_BUF_NR; i++) {
-	free_dev_mem(devbufs[i].uva);
-    }
+    // for (i=0; i<KGPU_BUF_NR; i++) {
+	free_dev_mem(devbuf.uva);
+    // }
     for (i=0; i<MAX_STREAM_NR; i++) {
 	csc( cudaStreamDestroy(streams[i]));
     }
@@ -118,32 +118,9 @@ int post_finished(struct kgpu_service_request *sreq)
  */
 int alloc_gpu_mem(struct kgpu_service_request *sreq)
 {
-    int i, oks=0;
-    unsigned long inaddr = (unsigned long)(sreq->hin);
-    unsigned long outaddr = (unsigned long)(sreq->hout);
-
-    for (i=0; i<KGPU_BUF_NR; i++) {
-	unsigned long hostbase = (unsigned long)(hostbufs[i].uva);
-	unsigned long devbase = (unsigned long)(devbufs[i].uva);
-
-	// for input
-        if (hostbase <= inaddr
-	    && hostbase + hostbufs[i].size >= inaddr + sreq->insize) {
-	    sreq->din = (void*)(devbase + (inaddr-hostbase));
-	    if (oks)
-		return 0;
-	    oks++;
-	}
-
-	// for output
-	if (hostbase <= outaddr
-	    && hostbase + hostbufs[i].size >= outaddr + sreq->outsize) {
-	    sreq->dout = (void*)(devbase + (outaddr-hostbase));
-	    if (oks)
-		return 0;
-	    oks++;
-	}	
-    }
+    sreq->din = (void*)ADDR_REBASE(devbuf.uva, hostbuf.uva, sreq->hin);
+    sreq->dout = (void*)ADDR_REBASE(devbuf.uva, hostbuf.uva, sreq->hout);
+    sreq->ddata = (void*)ADDR_REBASE(devbuf.uva, hostbuf.uva, sreq->hdata);
     return 1;
 }
 
@@ -151,6 +128,7 @@ void free_gpu_mem(struct kgpu_service_request *sreq)
 {
     sreq->din = NULL;
     sreq->dout = NULL;
+    sreq->ddata = NULL;
 }
 
 int alloc_stream(struct kgpu_service_request *sreq)

@@ -31,7 +31,7 @@ struct _kgpu_sritem {
 
 static int devfd;
 
-struct kgpu_gpu_mem_info hostbufs[KGPU_BUF_NR];
+struct kgpu_gpu_mem_info hostbuf;
 
 volatile int loop_continue = 1;
 
@@ -82,18 +82,18 @@ static int init_kgpu(void)
     init_gpu();
 
     /* alloc GPU Pinned memory buffers */
-    for (i=0; i<KGPU_BUF_NR; i++) {
-	hostbufs[i].uva = (void*)alloc_pinned_mem(KGPU_BUF_SIZE);
-	hostbufs[i].size = KGPU_BUF_SIZE;
-	dbg("%p \n", hostbufs[i].uva);
-	memset(hostbufs[i].uva, 0, KGPU_BUF_SIZE);
-	ssc( mlock(hostbufs[i].uva, KGPU_BUF_SIZE));
-    }
+    /* for (i=0; i<KGPU_BUF_NR; i++) { */
+	hostbuf.uva = (void*)alloc_pinned_mem(KGPU_BUF_SIZE);
+	hostbuf.size = KGPU_BUF_SIZE;
+	dbg("%p \n", hostbuf.uva);
+	memset(hostbuf.uva, 0, KGPU_BUF_SIZE);
+	ssc( mlock(hostbuf.uva, KGPU_BUF_SIZE));
+    /* } */
     
-    len = KGPU_BUF_NR*sizeof(struct kgpu_gpu_mem_info);
+    len = sizeof(struct kgpu_gpu_mem_info);
 
     /* tell kernel the buffers */
-    r = ioctl(devfd, KGPU_IOC_SET_GPU_BUFS, (unsigned long)hostbufs);
+    r = ioctl(devfd, KGPU_IOC_SET_GPU_BUFS, (unsigned long)&hostbuf);
     if (r < 0) {
 	perror("Write req file for buffers.");
 	abort();
@@ -111,9 +111,9 @@ static int finit_kgpu(void)
     close(devfd);
     finit_gpu();
 
-    for (i=0; i<KGPU_BUF_NR; i++) {
-	free_pinned_mem(hostbufs[i].uva);
-    }
+    /* for (i=0; i<KGPU_BUF_NR; i++) { */
+	free_pinned_mem(hostbuf.uva);
+    /* } */
     return 0;
 }
 
@@ -151,6 +151,8 @@ static void free_kgpu_service_request(struct _kgpu_sritem *s)
 static void init_kgpu_service_request(struct _kgpu_sritem *item,
 			       struct kgpu_ku_request *kureq)
 {
+    dbg("get request %d %s\n", kureq->id, kureq->service_name);
+    
     list_add_tail(&item->glist, &all_reqs);
 
     memset(&item->sr, 0, sizeof(struct kgpu_service_request));
@@ -163,7 +165,7 @@ static void init_kgpu_service_request(struct _kgpu_sritem *item,
     item->sr.datasize = kureq->datasize;
     item->sr.stream_id = -1;
     item->sr.s = kgpu_lookup_service(kureq->service_name);
-    if (item->sr.s) {
+    if (!item->sr.s) {
 	fail_request(item, KGPU_NO_SERVICE);
     } else {
 	item->sr.s->compute_size(&item->sr);

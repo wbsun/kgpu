@@ -22,60 +22,58 @@
 
 #include "../../../kgpu/kgpu.h"
 
-int mycb(struct kgpu_req *req, struct kgpu_resp *resp)
+/* customized log function */
+#define g_log(level, ...) kgpu_do_log(level, "calg2", ##__VA_ARGS__)
+#define dbg(...) g_log(KGPU_LOG_DEBUG, ##__VA_ARGS__)
+
+
+int mycb(struct kgpu_request *req)
 {
-    printk("[calg2]: REQ ID: %d, RESP ID: %d, RESP CODE: %d, %d\n",
-	   req->kureq.id, resp->kuresp.id, resp->kuresp.errcode,
-	   *(int*)(__va(((struct kgpu_buffer*)(req->data))->pas[0])));
-    free_gpu_buffer((struct kgpu_buffer*)(req->data));
-    free_kgpu_request(req);
-    free_kgpu_response(resp);
+    g_log(KGPU_LOG_PRINT, "REQ ID: %d, RESP CODE: %d, %d\n",
+	   req->id, req->errcode,
+	   ((int*)(req->out))[0]);
+
+    kgpu_vfree(req->in);
+    kgpu_free_request(req);
     return 0;
 }
 
 static int __init minit(void)
 {
-    struct kgpu_req* req;
-    struct kgpu_resp* resp;
-    struct kgpu_buffer *buf;
+    struct kgpu_request* req;
+    char *buf;
     
-    printk("[calg2]: loaded\n");
+    g_log(KGPU_LOG_PRINT, "loaded\n");
 
-    req = alloc_kgpu_request();
+    req = kgpu_alloc_request();
     if (!req) {
-	printk("[calg2] Error: request null\n");
+	g_log(KGPU_LOG_ERROR, "request null\n");
 	return 0;
     }
-    resp = alloc_kgpu_response();
-    if (!resp) {
-	printk("[calg2] Error: response null\n");
-	return 0;
-    }
-    buf = alloc_gpu_buffer(PAGE_SIZE);
+    
+    buf = (char*)kgpu_vmalloc(PAGE_SIZE);
     if (!buf) {
-	printk("[calg2] Error: buffer null\n");
+        g_log(KGPU_LOG_ERROR, "buffer null\n");
 	return 0;
     }
-    req->data = buf;
-    /*req->kureq.id = next_kgpu_request_id();*/
-    resp->kuresp.id = req->kureq.id;
 
-    req->kureq.input = buf->va;
-    req->kureq.insize = 1024;
-    req->kureq.output = req->kureq.input;/*+1024;*/
-    req->kureq.outsize = 1024;
-    strcpy(req->kureq.sname, "test_service");
-    req->cb = mycb;
+    req->in = buf;
+    req->insize = 1024;
+    req->out = buf;/*+1024;*/
+    req->outsize = 1024;
+    strcpy(req->service_name, "test_service");
+    req->callback = mycb;
 
-    *(int*)(__va(buf->pas[0])) = 100;
-    call_gpu(req, resp);
+    ((int*)(buf))[0] = 100;
+
+    kgpu_call_async(req);
     
     return 0;
 }
 
 static void __exit mexit(void)
 {
-    printk("[calg2]: unload\n");
+    g_log(KGPU_LOG_PRINT, "unload\n");
 }
 
 module_init(minit);

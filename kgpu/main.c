@@ -182,7 +182,7 @@ int kgpu_call_sync(struct kgpu_request *req)
     
     req->kdata = data->oldkdata;
     req->callback = data->oldcallback;
-    kfree(data);
+    kmem_cache_free(kgpu_sync_call_data, data);
     
     return 0;
 }
@@ -281,7 +281,14 @@ void kgpu_vfree(void *p)
     }
 
     nunits = kgpudev.gmpool.alloc_sz[idx];
-    if (nunits == 0 || nunits > (kgpudev.gmpool.nunits - idx)) {
+    if (nunits == 0) {
+	/*
+	 * We allow such case because this allows users free memory
+	 * from any field among in, out and data in request.
+	 */
+	return;
+    }
+    if (nunits > (kgpudev.gmpool.nunits - idx)) {
 	kgpu_log(KGPU_LOG_ERROR, "incorrect GPU memory allocation info: "
 		 "allocated %u units at unit index %u\n", nunits, idx);
 	return;
@@ -343,15 +350,17 @@ static void fill_ku_request(struct kgpu_ku_request *kureq,
 {
     kureq->id = req->id;
     memcpy(kureq->service_name, req->service_name, KGPU_SERVICE_NAME_SIZE);
-    kureq->in = (void*)(
-	(unsigned long)(kgpudev.gmpool.uva)
-	+ ((unsigned long)(req->in)-(kgpudev.gmpool.kva)));
-    kureq->out = (void*)(
-	(unsigned long)(kgpudev.gmpool.uva)
-	+ ((unsigned long)(req->out)-(kgpudev.gmpool.kva)));
-    kureq->data = (void*)(
-	(unsigned long)(kgpudev.gmpool.uva)
-	+ ((unsigned long)(req->udata)-(kgpudev.gmpool.kva)));
+
+    kureq->in = (void*)ADDR_REBASE(kgpudev.gmpool.uva,
+				   kgpudev.gmpool.kva,
+				   req->in);
+    kureq->out = (void*)ADDR_REBASE(kgpudev.gmpool.uva,
+				   kgpudev.gmpool.kva,
+				   req->out);
+    kureq->data = (void*)ADDR_REBASE(kgpudev.gmpool.uva,
+				   kgpudev.gmpool.kva,
+				   req->udata);
+        
     kureq->insize = req->insize;
     kureq->outsize = req->outsize;
     kureq->datasize = req->udatasize;

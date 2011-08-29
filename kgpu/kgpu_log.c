@@ -24,7 +24,7 @@
 
 #endif /* __KERNEL__ */
 
-int kgpu_log_level = KGPU_LOG_ALERT;
+int kgpu_log_level = -1;
 
 void
 kgpu_generic_log(int level, const char *module, const char *filename,

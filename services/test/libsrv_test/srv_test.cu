@@ -19,40 +19,42 @@ __global__ void inc_kernel(int *din, int *dout)
     dout[id] = din[id]+1;    
 }
 
-int test_compute_size(struct service_request *sr)
+int test_compute_size(struct kgpu_service_request *sr)
 {
     sr->block_x = 32;
-    sr->grid_x = sr->kureq.insize/128;
+    sr->grid_x = sr->insize/256;
     sr->block_y = 1;
     sr->grid_y = 1;
 
     return 0;
 }
 
-int test_launch(struct service_request *sr)
+int test_launch(struct kgpu_service_request *sr)
 {
+    printf("invoke kernel\n");
     inc_kernel<<<dim3(sr->grid_x, sr->grid_y), dim3(sr->block_x, sr->block_y), 0, (cudaStream_t)(sr->stream)>>>
-	((int*)sr->dinput, (int*)sr->doutput);
+	((int*)sr->din, (int*)sr->dout);
+    printf("invoke done\n");
     return 0;
 }
 
-int test_prepare(struct service_request *sr)
+int test_prepare(struct kgpu_service_request *sr)
 {
     cudaStream_t s = (cudaStream_t)(sr->stream);//get_stream(sr->stream_id);
-    csc( ah2dcpy( sr->dinput, sr->kureq.input, sr->kureq.insize, s) );
+    csc( ah2dcpy( sr->din, sr->hin, sr->insize, s) );
     return 0;
 }
 
-int test_post(struct service_request *sr)
+int test_post(struct kgpu_service_request *sr)
 {
     cudaStream_t s = (cudaStream_t)(sr->stream);//get_stream(sr->stream_id);
-    csc( ad2hcpy( sr->kureq.output, sr->doutput, sr->kureq.outsize, s) );
+    csc( ad2hcpy( sr->hout, sr->dout, sr->outsize, s) );
     return 0;
 }
 
-struct service test_srv;
+struct kgpu_service test_srv;
 
-extern "C" int init_service(void *lh, int (*reg_srv)(struct service*, void*))
+extern "C" int init_service(void *lh, int (*reg_srv)(struct kgpu_service*, void*))
 {
     printf("[libsrv_test] Info: init test service\n");
     

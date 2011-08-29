@@ -72,110 +72,71 @@ crypto_gaes_ecb_crypt(
     int err=0;
     unsigned int rsz = roundup(sz, PAGE_SIZE);
     unsigned int nbytes;
-    u8* gpos;
-    unsigned long cpdbytes=0;  
-    
-    struct kgpu_req *req;
-    struct kgpu_resp *resp;
-    struct kgpu_buffer *buf;
+
+    struct kgpu_request *req;
+    char *buf;
 
     struct crypto_blkcipher *tfm    = desc->tfm;
     struct crypto_gaes_ecb_ctx *ctx = crypto_blkcipher_ctx(tfm);
     struct blkcipher_walk walk;
 
-
     blkcipher_walk_init(&walk, dst, src, sz);
     
-    buf = alloc_gpu_buffer(rsz+2*PAGE_SIZE);
+    buf = kgpu_vmalloc(rsz+sizeof(struct crypto_aes_ctx));
     if (!buf) {
 	g_log(KGPU_LOG_ERROR, "GPU buffer is null.\n");
 	return -EFAULT;
     }
 
-    req  = alloc_kgpu_request();
-    resp = alloc_kgpu_response();
-    if (!req || !resp) {
+    req  = kgpu_alloc_request();
+    if (!req) {
+	kgpu_vfree(buf);
+	g_log(KGPU_LOG_ERROR, "can't allocate request\n");
 	return -EFAULT;
     }
+
+    req->in = buf;
+    req->out = buf;
+    req->insize = rsz+sizeof(struct crypto_aes_ctx);
+    req->outsize = sz;
+    req->udatasize = sizeof(struct crypto_aes_ctx);
+    req->udata = buf+rsz;
 
     err = blkcipher_walk_virt(desc, &walk);
 
     while ((nbytes = walk.nbytes)) {
-	u8 *wsrc             = walk.src.virt.addr;
-	unsigned long offset = cpdbytes&(PAGE_SIZE-1);
-	unsigned long idx    = cpdbytes>>PAGE_SHIFT;
+	u8 *wsrc = walk.src.virt.addr;
+
+	memcpy(buf, wsrc, nbytes);
+	buf += nbytes;
 	
-	if (nbytes > PAGE_SIZE) {
-	    return -EFAULT;
-	}
-
-	gpos = (u8*)(buf->pas[idx])+offset;
-	while (nbytes > PAGE_SIZE-offset) { /* 'if' should be fine */
-	    unsigned long realsz = PAGE_SIZE-offset;
-	    memcpy(__va(gpos), wsrc, realsz);
-	    cpdbytes += realsz;
-	    nbytes   -= realsz;
-	    idx       = cpdbytes>>PAGE_SHIFT;
-	    offset    = cpdbytes&(PAGE_SIZE-1);
-	    wsrc     += realsz;
-	    gpos      = (u8*)(buf->pas[idx])+offset;
-	}
-	memcpy(__va(gpos), wsrc, nbytes);
-	cpdbytes += nbytes;
-
 	err = blkcipher_walk_done(desc, &walk, 0);
     }
 
-    gpos = (u8*)(buf->pas[rsz>>PAGE_SHIFT])+(rsz&(PAGE_SIZE-1));
-    memcpy(__va(gpos), &(ctx->aes_ctx), sizeof(struct crypto_aes_ctx));   
+    memcpy(req->udata, &(ctx->aes_ctx), sizeof(struct crypto_aes_ctx));   
+    strcpy(req->service_name, enc?"gaes_ecb-enc":"gaes_ecb-dec");
 
-    strcpy(req->kureq.sname, enc?"gaes_ecb-enc":"gaes_ecb-dec");
-    req->kureq.input    = buf->va;
-    req->kureq.output   = buf->va;
-    req->kureq.insize   = rsz+PAGE_SIZE;
-    req->kureq.outsize  = rsz;
-    req->kureq.data     = (u8*)(buf->va) + rsz;
-    req->kureq.datasize = sizeof(struct crypto_aes_ctx);
-
-    if (call_gpu_sync(req, resp)) {
+    if (kgpu_call_sync(req)) {
 	err = -EFAULT;
 	g_log(KGPU_LOG_ERROR, "callgpu error\n");
     } else {
-	cpdbytes = 0;
 	blkcipher_walk_init(&walk, dst, src, sz);
 	err = blkcipher_walk_virt(desc, &walk);
+	buf = (char*)req->out;
  	
 	while ((nbytes = walk.nbytes)) {
-	    u8 *wdst             = walk.dst.virt.addr;
-	    unsigned long offset = cpdbytes&(PAGE_SIZE-1);
-	    unsigned long idx    = cpdbytes>>PAGE_SHIFT;
-	
-	    if (nbytes > PAGE_SIZE) {
-		return -EFAULT;
-	    }
+	    u8 *wdst = walk.dst.virt.addr;
 
-	    gpos = (u8*)(buf->pas[idx])+offset;
-	    while (nbytes > PAGE_SIZE-offset) { /* 'if' should be fine */
-		unsigned long realsz = PAGE_SIZE-offset;
-		memcpy(wdst, __va(gpos), realsz);
-		cpdbytes += realsz;
-		nbytes   -= realsz;
-		idx       = cpdbytes>>PAGE_SHIFT;
-		offset    = cpdbytes&(PAGE_SIZE-1);
-		wdst     += realsz;
-		gpos      = (u8*)(buf->pas[idx])+offset;
-	    }
-	    memcpy(wdst, __va(gpos), nbytes);
-	    cpdbytes += nbytes;
-	
+	    memcpy(wdst, buf, nbytes);
+	    buf += nbytes;
+	    
 	    err = blkcipher_walk_done(desc, &walk, 0);
 	}
     }
-    
-    free_kgpu_request(req);
-    free_kgpu_response(resp);
-    free_gpu_buffer(buf);
 
+    kgpu_vfree(req->in);
+    kgpu_free_request(req);
+    
     return err;
 }
 

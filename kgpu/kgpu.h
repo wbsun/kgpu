@@ -12,6 +12,10 @@
 #ifndef __KGPU_H__
 #define __KGPU_H__
 
+#define ADDR_REBASE(dst_base, src_base, pointer)			\
+    (((unsigned long)(dst_base)) + (					\
+	((unsigned long)(pointer))-((unsigned long)(src_base))))
+
 struct kgpu_gpu_mem_info {
     void *uva;
     unsigned long size;

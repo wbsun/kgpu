@@ -21,7 +21,6 @@ struct gpq_async_data {
     int disks;
     size_t dsize;
     void **dps;
-    struct kgpu_buffer *buf;
 };
 
 /* customized log function */
@@ -59,34 +58,28 @@ static void cpu_gen_syndrome(int disks, size_t dsize, void **dps)
 }
 
 static void end_syndrome_gen(
-    int disks, size_t dsize, void **dps, struct kgpu_buffer* buf)
+    int disks, size_t dsize, void **dps, struct kgpu_request *req)
 {
-    int p, b;
-    size_t cpsz;
-    p = dsize*(disks-2)/PAGE_SIZE;
+    int b;
+    size_t rdsize = roundup(dsize, PAGE_SIZE);
+    
     for (b=disks-2; b<disks; b++) {
-	cpsz = 0;
-	while (cpsz < dsize) {
-	    memcpy((u8*)dps[b]+cpsz, __va(buf->pas[p]), PAGE_SIZE);
-	    p++;
-	    cpsz += PAGE_SIZE;
-	}
+	memcpy(dps[b], ((char*)(req->out))+(b-disks+2)*rdsize, dsize);
     }
 }
 
 static int async_gpu_callback(
-    struct kgpu_req *req, struct kgpu_resp *resp)
+    struct kgpu_request *req)
 {
-    struct gpq_async_data *adata = (struct gpq_async_data*)req->data;
+    struct gpq_async_data *adata = (struct gpq_async_data*)req->kdata;
 
     end_syndrome_gen(
-	adata->disks, adata->dsize, adata->dps, adata->buf);
+	adata->disks, adata->dsize, adata->dps, req);
 
     complete(adata->c);
 
-    free_gpu_buffer(adata->buf);
-    free_kgpu_request(req);
-    free_kgpu_response(resp);
+    kgpu_vfree(req->in);
+    kgpu_free_request(req);
     kfree(adata);
 
     return 0;
@@ -98,64 +91,47 @@ static int async_gpu_callback(
 static void gpu_gen_syndrome(
     int disks, size_t dsize, void **dps, struct completion *c)
 {
-    size_t rsz = roundup(
-	dsize*disks+sizeof(struct raid6_pq_data), PAGE_SIZE);
+    size_t rsz, rdsize;
 
     struct raid6_pq_data *data;
-    struct kgpu_req *req;
-    struct kgpu_resp *resp;
-    struct kgpu_buffer *buf;
+    struct kgpu_request *req;
+    char *buf;
 
-    int p=0, b;
-    size_t cpsz;
-    u8 *gpos;
-    unsigned long offset;
+    int b;
+ 
+    rdsize = roundup(dsize, PAGE_SIZE);
+    rsz = roundup(rdsize*disks, PAGE_SIZE) + sizeof(struct raid6_pq_data);
 
-    buf = alloc_gpu_buffer(rsz);
+    buf = (char*)kgpu_vmalloc(rsz);
     if (unlikely(!buf)) {
 	gpq_log(KGPU_LOG_ERROR, "GPU buffer allocation failed\n");
 	return;
     }
 
-    req = alloc_kgpu_request();
-    resp = alloc_kgpu_response();
-    if (unlikely(!req || !resp)) {
+    req = kgpu_alloc_request();
+    if (unlikely(!req)) {
 	gpq_log(KGPU_LOG_ERROR,
-		"GPU request/response allocation failed\n");
+		"GPU request allocation failed\n");
 	return;
     }
 
-    if (unlikely(dsize%PAGE_SIZE)) {
-	gpq_log(KGPU_LOG_ERROR,
-		"gpq only handle PAGE aligned memory\n");
-	free_gpu_buffer(buf);
-	
-	return;
-    }
+    strcpy(req->service_name, "raid6_pq");
+    req->in = buf;
+    req->out = buf+rdsize*(disks-2);
+    req->insize = rsz;
+    req->outsize = rdsize*2;
+    req->udata = buf+roundup(rdsize*disks, PAGE_SIZE);
+    req->udatasize  = sizeof(struct raid6_pq_data);
 
-    for (b=0; b<disks-2; b++) {
-	cpsz=0;
-	while (cpsz < dsize) {
-	    memcpy(
-		__va(buf->pas[p]),
-		((u8*)dps[b])+cpsz, PAGE_SIZE);
-	    p++;
-	    cpsz += PAGE_SIZE;
-	}
-    }
-    
-    strcpy(req->kureq.sname, "raid6_pq");
-    req->kureq.input     = buf->va;
-    req->kureq.output    = ((u8*)(buf->va))+dsize*(disks-2);
-    req->kureq.insize    = rsz;
-    req->kureq.outsize   = dsize*2;
-    req->kureq.data      = (u8*)(buf->va)+dsize*disks;
-    req->kureq.datasize  = sizeof(struct raid6_pq_data);
-
-    data = __va(buf->pas[(dsize*disks)>>PAGE_SHIFT]);
+    data = (struct raid6_pq_data*)req->udata;
     data->dsize = (unsigned long)dsize;
     data->nr_d = (unsigned int)disks;
-
+    
+    for (b=0; b<disks-2; b++) {
+	memcpy(buf, dps[b], dsize);
+	buf += rdsize;
+    }
+    
     if (c) {
 	struct gpq_async_data *adata =
 	    kmalloc(sizeof(struct gpq_async_data), GFP_KERNEL);
@@ -163,27 +139,25 @@ static void gpu_gen_syndrome(
 	    gpq_log(KGPU_LOG_ERROR,
 		    "out of memory for gpq async data\n");
 	} else {	    
-	    req->cb = async_gpu_callback;
-	    req->data = adata;
+	    req->callback = async_gpu_callback;
+	    req->kdata = adata;
 
 	    adata->c = c;
 	    adata->disks = disks;
 	    adata->dsize = dsize;
 	    adata->dps = dps;
-	    adata->buf = buf;
 	    
-	    call_gpu(req, resp);
+	    kgpu_call_async(req);
 	}
     } else {
-	if (call_gpu_sync(req, resp)) {
+	if (kgpu_call_sync(req)) {
 	    gpq_log(KGPU_LOG_ERROR, "callgpu failed\n");
 	} else {
-	    end_syndrome_gen(disks, dsize, dps, buf);
+	    end_syndrome_gen(disks, dsize, dps, req);
 	}
 
-	free_gpu_buffer(buf);
-	free_kgpu_request(req);
-	free_kgpu_response(resp);
+	kgpu_vfree(buf);
+	kgpu_free_request(req);
     }    
 }
 

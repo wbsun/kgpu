@@ -112,7 +112,7 @@ int kgpu_call_async(struct kgpu_request *req)
     
     spin_unlock(&(kgpudev.reqlock));
 
-    kgpu_log(KGPU_LOG_INFO, "call gpu %d\n", req->id);
+    dbg("call gpu %d\n", req->id);
     
     return 0;
 }
@@ -182,7 +182,7 @@ int kgpu_call_sync(struct kgpu_request *req)
     
     req->kdata = data->oldkdata;
     req->callback = data->oldcallback;
-    kmem_cache_free(kgpu_sync_call_data, data);
+    kmem_cache_free(kgpu_sync_call_data_cache, data);
     
     return 0;
 }
@@ -201,6 +201,8 @@ int kgpu_next_request_id(void)
     rt = kgpudev.rid_sequence;
     
     spin_unlock(&(kgpudev.ridlock));
+
+    dbg("called next req id %d\n", rt);
     return rt;
 }
 EXPORT_SYMBOL_GPL(kgpu_next_request_id);
@@ -211,8 +213,18 @@ static void kgpu_request_item_constructor(void *data)
 	(struct _kgpu_request_item*)data;
 
     if (item) {
+	memset(item, 0, sizeof(struct _kgpu_request_item));
 	INIT_LIST_HEAD(&item->list);
 	item->r = NULL;
+    }
+}
+
+static void kgpu_sync_call_data_constructor(void *data)
+{
+    struct _kgpu_sync_call_data *d =
+	(struct _kgpu_sync_call_data*)data;
+    if (d) {
+	memset(d, 0, sizeof(struct _kgpu_sync_call_data));
     }
 }
 
@@ -229,7 +241,8 @@ static void kgpu_request_constructor(void* data)
 struct kgpu_request* kgpu_alloc_request(void)
 {
     struct kgpu_request *req =
-	kmem_cache_alloc(kgpu_request_cache, GFP_KERNEL);    
+	kmem_cache_alloc(kgpu_request_cache, GFP_KERNEL);
+    dbg("new request allocated %d\n", req->id);
     return req;
 }
 EXPORT_SYMBOL_GPL(kgpu_alloc_request);
@@ -237,6 +250,7 @@ EXPORT_SYMBOL_GPL(kgpu_alloc_request);
 
 void kgpu_free_request(struct kgpu_request* req)
 {
+    dbg("request freeed %d\n", req->id);
     kmem_cache_free(kgpu_request_cache, req);
 }
 EXPORT_SYMBOL_GPL(kgpu_free_request);
@@ -482,7 +496,7 @@ ssize_t kgpu_write(struct file *filp, const char __user *buf,
 	     * the response can't be processed ASAP.
 	     */
 	    item->r->callback(item->r);
-	    ret = realcount;
+	    ret = count;/*realcount;*/
 	    *fpos += ret;
 	    kmem_cache_free(kgpu_request_item_cache, item);
 	}
@@ -698,7 +712,7 @@ static int kgpu_init(void)
 
     kgpu_sync_call_data_cache = kmem_cache_create(
 	"kgpu_sync_call_data_cache", sizeof(struct _kgpu_sync_call_data), 0,
-	SLAB_HWCACHE_ALIGN, NULL);
+	SLAB_HWCACHE_ALIGN, kgpu_sync_call_data_constructor);
     if (!kgpu_sync_call_data_cache) {
 	kgpu_log(KGPU_LOG_ERROR, "can't create sync call data cache\n");
 	kmem_cache_destroy(kgpu_request_cache);

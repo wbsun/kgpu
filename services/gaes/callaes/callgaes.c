@@ -202,13 +202,13 @@ static int __init taes_init(void)
 	printk("test gaes loaded\n");
 	/* CIPHER = AES_GPU_ASM; */
 	/* test_aes(); */
-	CIPHER = AES_GPU_GENERIC;
+	CIPHER = AES_GPU;
 	test_aes();
 	/* CIPHER = AES_GPU; */
 	/* test_aes(); */
 	/* CIPHER = AES_ASM; */
 	/* test_aes(); */
-	CIPHER = AES_GENERIC;
+	CIPHER = AES;
 	test_aes();
 	/* CIPHER = AES; */
 	/* test_aes(); */

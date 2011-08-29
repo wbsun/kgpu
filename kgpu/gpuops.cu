@@ -121,7 +121,7 @@ int alloc_gpu_mem(struct kgpu_service_request *sreq)
     sreq->din = (void*)ADDR_REBASE(devbuf.uva, hostbuf.uva, sreq->hin);
     sreq->dout = (void*)ADDR_REBASE(devbuf.uva, hostbuf.uva, sreq->hout);
     sreq->ddata = (void*)ADDR_REBASE(devbuf.uva, hostbuf.uva, sreq->hdata);
-    return 1;
+    return 0;
 }
 
 void free_gpu_mem(struct kgpu_service_request *sreq)

@@ -15,8 +15,6 @@ static cudaError_t _cuda_safe_call(cudaError_t e, const char *file, int line) {
     if (e!=cudaSuccess) {
 	fprintf(stderr, "kgpu Error: %s %d %s\n",
 		file, line, cudaGetErrorString(e));
-	//cpu_cleanup();
-	//gpu_cleanup();
 	cudaThreadExit();
 	abort();
     }

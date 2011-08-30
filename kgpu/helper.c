@@ -79,8 +79,6 @@ static int init_kgpu(void)
     
     devfd = ssc(open(kgpudev, O_RDWR));
 
-    init_gpu();
-
     /* alloc GPU Pinned memory buffers */
     /* for (i=0; i<KGPU_BUF_NR; i++) { */
 	hostbuf.uva = (void*)alloc_pinned_mem(KGPU_BUF_SIZE);
@@ -89,6 +87,8 @@ static int init_kgpu(void)
 	memset(hostbuf.uva, 0, KGPU_BUF_SIZE);
 	ssc( mlock(hostbuf.uva, KGPU_BUF_SIZE));
     /* } */
+
+	init_gpu();
     
     len = sizeof(struct kgpu_gpu_mem_info);
 

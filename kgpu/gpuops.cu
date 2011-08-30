@@ -42,8 +42,10 @@ void init_gpu()
 {
     int i;
 
+    // csc(cudaHostGetDevicePointer((void**)(&devbuf.uva),
+				 // (void*)(hostbuf.uva), 0));
     // for (i=0; i< KGPU_BUF_NR; i++) {
-	devbuf.uva = alloc_dev_mem(KGPU_BUF_SIZE);
+    devbuf.uva = alloc_dev_mem(KGPU_BUF_SIZE);
     // }
 
     for (i=0; i<MAX_STREAM_NR; i++) {
@@ -57,7 +59,7 @@ void finit_gpu()
     int i;
 
     // for (i=0; i<KGPU_BUF_NR; i++) {
-	free_dev_mem(devbuf.uva);
+    free_dev_mem(devbuf.uva);
     // }
     for (i=0; i<MAX_STREAM_NR; i++) {
 	csc( cudaStreamDestroy(streams[i]));
@@ -74,7 +76,7 @@ unsigned long get_stream(int stid)
 
 void *alloc_pinned_mem(unsigned long size) {
     void *h;
-    csc( cudaHostAlloc(&h, size, 0) );
+    csc( cudaHostAlloc(&h, size, 0));//cudaHostAllocWriteCombined) );
     return h;
 }
 

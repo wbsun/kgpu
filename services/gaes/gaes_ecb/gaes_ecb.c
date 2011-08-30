@@ -102,7 +102,7 @@ crypto_gaes_ecb_crypt(
     req->udatasize = sizeof(struct crypto_aes_ctx);
     req->udata = buf+rsz;
 
-    err = blkcipher_walk_virt(desc, &walk);
+    /*err = blkcipher_walk_virt(desc, &walk);
 
     while ((nbytes = walk.nbytes)) {
 	u8 *wsrc = walk.src.virt.addr;
@@ -111,7 +111,7 @@ crypto_gaes_ecb_crypt(
 	buf += nbytes;
 	
 	err = blkcipher_walk_done(desc, &walk, 0);
-    }
+	}*/
 
     memcpy(req->udata, &(ctx->aes_ctx), sizeof(struct crypto_aes_ctx));   
     strcpy(req->service_name, enc?"gaes_ecb-enc":"gaes_ecb-dec");
@@ -120,7 +120,7 @@ crypto_gaes_ecb_crypt(
 	err = -EFAULT;
 	g_log(KGPU_LOG_ERROR, "callgpu error\n");
     } else {
-	blkcipher_walk_init(&walk, dst, src, sz);
+	/*blkcipher_walk_init(&walk, dst, src, sz);
 	err = blkcipher_walk_virt(desc, &walk);
 	buf = (char*)req->out;
  	
@@ -131,7 +131,7 @@ crypto_gaes_ecb_crypt(
 	    buf += nbytes;
 	    
 	    err = blkcipher_walk_done(desc, &walk, 0);
-	}
+	    }*/
     }
 
     kgpu_vfree(req->in);

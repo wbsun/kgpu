@@ -148,7 +148,7 @@ void test_aes(void)
 		sg_set_buf(dst+i, buf, PAGE_SIZE);
 	}
 	
-	for (bs = MAX_BLK_SIZE; bs >= MIN_BLK_SIZE; bs-=PAGE_SIZE) {
+	for (bs = MAX_BLK_SIZE; bs >= MIN_BLK_SIZE; bs >>= 1) {
 		struct timeval t0, t1;
 		long int enc, dec;
 

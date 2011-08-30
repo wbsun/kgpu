@@ -50,6 +50,8 @@ struct kgpu_ku_response {
 #define KGPU_BUF_NR 1
 #define KGPU_BUF_SIZE (1024*1024*1024)
 
+#define KGPU_MMAP_SIZE (2*KGPU_BUF_SIZE)
+
 #define KGPU_DEV_NAME "kgpu"
 
 /* ioctl */

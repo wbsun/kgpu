@@ -41,6 +41,7 @@ int raid6_pq_prepare(struct kgpu_service_request *sr)
     struct raid6_pq_data* data = (struct raid6_pq_data*)(sr->hdata);
     cudaStream_t s = (cudaStream_t)(sr->stream);
   
+    // csc( ah2dcpy( sr->din, sr->hin, 1024, s) );
     csc( ah2dcpy( sr->din, sr->hin, data->dsize*(data->nr_d-2), s) );
 
     return 0;
@@ -63,6 +64,7 @@ int raid6_pq_post(struct kgpu_service_request *sr)
     cudaStream_t s = (cudaStream_t)(sr->stream);
 
     /* outsize should be 2*data->dsize */
+    // csc( ad2hcpy( sr->hout, sr->dout, 1024, s ) );
     csc( ad2hcpy( sr->hout, sr->dout, sr->outsize, s ) );
 
     return 0;

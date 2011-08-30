@@ -60,6 +60,8 @@ struct _kgpu_dev {
     struct _kgpu_mempool gmpool;
     spinlock_t gmpool_lock;
 
+    struct vm_area_struct *mmap_vma;
+
     int state;
 };
 
@@ -68,15 +70,15 @@ struct _kgpu_request_item {
     struct kgpu_request *r;
 };
 
-static atomic_t kgpudev_av = ATOMIC_INIT(1);
-static struct _kgpu_dev kgpudev;
-
 struct _kgpu_sync_call_data {
 	wait_queue_head_t queue;
 	void* oldkdata;
 	kgpu_callback oldcallback;
 	int done;
 };
+
+static atomic_t kgpudev_av = ATOMIC_INIT(1);
+static struct _kgpu_dev kgpudev;
 
 static struct kmem_cache *kgpu_request_cache;
 static struct kmem_cache *kgpu_request_item_cache;
@@ -315,6 +317,16 @@ void kgpu_vfree(void *p)
 }
 EXPORT_SYMBOL_GPL(kgpu_vfree);
 
+unsigned long kgpu_find_mmap_area(unsigned long size)
+{
+    
+}
+EXPORT_SYMBOL_GPL(kgpu_find_mmap_area);
+
+void kgpu_map_page(struct page *p, unsigned long mapaddr)
+{
+}
+EXPORT_SYMBOL_GPL(kgpu_map_page);
 
 /*
  * find request by id in the rtdreqs
@@ -663,6 +675,47 @@ static unsigned int kgpu_poll(struct file *filp, poll_table *wait)
     return mask;
 }
 
+static void kgpu_vm_open(struct vm_area_struct *vma)
+{
+    // just let it go
+}
+
+static void kgpu_vm_close(struct vm_area_struct *vma)
+{
+    // nothing we can do now
+}
+
+static int kgpu_vm_fault(struct vm_area_struct *vma,
+			 struct vm_fault *vmf)
+{
+    /* should never call this */
+    kgpu_log(KGPU_LOG_ERROR,
+	     "kgpu mmap area being accessed without pre-mapping 0x%lX",
+	     (unsigned long)vmf->virtual_address);
+    return VM_FAULT_SIGBUS;
+}
+
+static struct vm_operations_struct kgpu_vm_ops = {
+    .open  = kgpu_vm_open,
+    .close = kgpu_vm_close,
+    .fault = kgpu_vm_fault,
+};
+
+static int kgpu_mmap(struct file *filp, struct vm_area_struct *vma)
+{
+    if (vma->vm_end - vma->vm_start != KGPU_MMAP_SIZE) {
+	kgpu_log(KGPU_LOG_ALERT,
+		 "mmap size incorrect from 0x$lX to 0x%lX with "
+		 "%lu bytes\n", vma->vm_start, vma->vm_end,
+		 vma->vm_end-vma->vm_start);
+	return -EINVAL;
+    }
+    vma->vm_ops = &kgpu_vm_ops;
+    vma->vm_flags |= VM_RESERVED;
+    kgpudev.mmap_vma = vma;
+    return 0;
+}
+
 static struct file_operations kgpu_ops =  {
     .owner          = THIS_MODULE,
     .read           = kgpu_read,
@@ -671,6 +724,7 @@ static struct file_operations kgpu_ops =  {
     .unlocked_ioctl = kgpu_ioctl,
     .open           = kgpu_open,
     .release        = kgpu_release,
+    .mmap           = kgpu_mmap,
 };
 
 static int kgpu_init(void)

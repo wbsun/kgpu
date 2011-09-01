@@ -77,11 +77,13 @@ static void dump_hex(u8* p, int rs, int cs)
 static int kh_init(void)
 {
     int  i, len, r;
+    void *p;
     
     devfd = ssc(open(kgpudev, O_RDWR));
 
     /* alloc GPU Pinned memory buffers */
-    hostbuf.uva = (void*)gpu_alloc_pinned_mem(KGPU_BUF_SIZE);
+    p = (void*)gpu_alloc_pinned_mem(KGPU_BUF_SIZE+PAGE_SIZE);
+    hostbuf.uva = p;
     hostbuf.size = KGPU_BUF_SIZE;
     dbg("%p \n", hostbuf.uva);
     memset(hostbuf.uva, 0, KGPU_BUF_SIZE);
@@ -90,7 +92,7 @@ static int kh_init(void)
     gpu_init();
 
     hostvma.uva = (void*)mmap(
-	NULL, KGPU_BUF_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_LOCKED, devfd, 0);
+	NULL, KGPU_BUF_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED, devfd, 0);
     hostvma.size = KGPU_BUF_SIZE;
     if (hostvma.uva == MAP_FAILED) {
 	kh_log(KGPU_LOG_ERROR,
@@ -98,6 +100,8 @@ static int kh_init(void)
 	perror("mmap for GPU");
 	abort();
     }
+    kh_log(KGPU_LOG_PRINT,
+	   "mmap start 0x%lX\n", hostvma.uva);
     
     len = sizeof(struct kgpu_gpu_mem_info);
 
@@ -182,6 +186,10 @@ static void kh_init_service_request(struct _kgpu_sritem *item,
 	item->sr.errcode = 0;
 	list_add_tail(&item->list, &init_reqs);
 	dbg("size computed\n");
+
+	dbg("new request: in: 0x%lX, out: 0x%lX, data: 0x%lX\n",
+	       kureq->in, kureq->out, kureq->data);
+	
     }
 }
 

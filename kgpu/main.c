@@ -389,6 +389,7 @@ static void kgpu_free_mmap_area(unsigned long start)
 void kgpu_unmap_area(unsigned long addr)
 {
     unsigned long idx = (addr-kgpudev.vm.start)>>PAGE_SHIFT;
+    return; // tmp workaround, this means we will consume the mem very soon...
 
     if (idx < 0 || idx >= kgpudev.vm.npages) {
 	kgpu_log(KGPU_LOG_ERROR,
@@ -407,8 +408,8 @@ void kgpu_unmap_area(unsigned long addr)
 	    bitmap_clear(kgpudev.vm.bitmap, idx, n);
 	    kgpudev.vm.alloc_sz[idx] = 0;
 	    spin_unlock(&kgpudev.vm_lock);
-	    /* no need to check the return value,
-	     * we already did.
+	    /* 
+	     * TODO: XXX: figure out how to remove the inserted pages
 	     */
 	    zap_vma_ptes(kgpudev.vm.vma, addr, n<<PAGE_SHIFT);
 	}
@@ -430,25 +431,33 @@ void *kgpu_map_pfns(unsigned long *pfns, int n)
     /*
      * We assume nobody will compete with us.
      */
-    /* down_write(kgpudev.vm.vma->vm_mm->mmap_sem); */
+    down_write(&kgpudev.vm.vma->vm_mm->mmap_sem);
 
     for (i=0; i<n; i++) {
-	ret = remap_pfn_range(kgpudev.vm.vma,
+	dbg("remap pfn 0x%lX\n", pfns[i]);
+	ret = vm_insert_page(kgpudev.vm.vma,
+			     addr+i*PAGE_SIZE,
+			     pfn_to_page(pfns[i]));
+	/*
+	 * the remap_pfn_range way is so-called official driver dev
+	 * method, unfoutunately, it doesn't work with us!
+	 */
+        /*ret = remap_pfn_range(kgpudev.vm.vma,
 			      addr+i*(PAGE_SIZE),
 			      pfns[i],
 			      PAGE_SIZE,
-			      kgpudev.vm.vma->vm_page_prot);
+			      kgpudev.vm.vma->vm_page_prot);*/
 	if (unlikely(ret < 0)) {
+	    up_write(&kgpudev.vm.vma->vm_mm->mmap_sem);
 	    kgpu_log(KGPU_LOG_ERROR,
 		     "can't remap pfn %lu, error code %d\n",
-		     pfns[i], ret);
+		     pfns[i],
+		     ret);
 	    return NULL;
 	}
     }
 
-    kgpudev.vm.vma->vm_flags &= ~VM_IO;
-
-    /* up_write(kgpudev.vm.vma->vm_mm->mmap_sem) */
+    up_write(&kgpudev.vm.vma->vm_mm->mmap_sem);
 
     return (void*)addr;
 }

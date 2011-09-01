@@ -15,7 +15,7 @@
 #define TO_UL(v) ((unsigned long)(v))
 
 #define ADDR_WITHIN(pointer, base, size)		\
-    (TO_UL(pointer) > TO_UL(base) &&			\
+    (TO_UL(pointer) >= TO_UL(base) &&			\
      (TO_UL(pointer) < TO_UL(base)+TO_UL(size)))
 
 #define ADDR_REBASE(dst_base, src_base, pointer)			\
@@ -54,7 +54,7 @@ struct kgpu_ku_response {
 
 /* the NR will not be used */
 #define KGPU_BUF_NR 1
-#define KGPU_BUF_SIZE (1024*1024*1024)
+#define KGPU_BUF_SIZE (1024*1024*128)
 
 #define KGPU_MMAP_SIZE KGPU_BUF_SIZE
 

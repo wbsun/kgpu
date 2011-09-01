@@ -92,7 +92,8 @@ void gpu_free_pinned_mem(void* p) {
 
 void gpu_pin_mem(void *p, size_t sz)
 {
-    csc( cudaHostRegister(p, round_up(sz, PAGE_SIZE), 0) );
+    size_t rsz = round_up(sz, PAGE_SIZE);
+    csc( cudaHostRegister(p, rsz, cudaHostRegisterPortable) );
 }
 
 void gpu_unpin_mem(void *p)
@@ -142,6 +143,7 @@ int gpu_alloc_device_mem(struct kgpu_service_request *sreq)
     else {
 	sreq->din =
 	    (void*)ADDR_REBASE(devbuf4vma.uva, hostvma.uva, sreq->hin);
+	
 	gpu_pin_mem(sreq->hin, sreq->insize);
     }
 

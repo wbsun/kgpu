@@ -31,13 +31,13 @@ typedef int (*fn_finit_service)(
 
 #ifdef __KGPU__
 
-struct kgpu_service * kgpu_lookup_service(const char *name);
-int kgpu_register_service(struct kgpu_service *s, void *libhandle);
-int kgpu_unregister_service(const char *name);
-int kgpu_load_service(const char *libpath);
-int kgpu_load_all_services(const char *libdir);
-int kgpu_unload_service(const char *name);
-int kgpu_unload_all_services();
+struct kgpu_service * kh_lookup_service(const char *name);
+int kh_register_service(struct kgpu_service *s, void *libhandle);
+int kh_unregister_service(const char *name);
+int kh_load_service(const char *libpath);
+int kh_load_all_services(const char *libdir);
+int kh_unload_service(const char *name);
+int kh_unload_all_services();
 
 #endif /* __KGPU__ */
 

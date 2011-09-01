@@ -42,6 +42,15 @@ struct _kgpu_mempool {
     u32           *alloc_sz;
 };
 
+struct _kgpu_vma {
+    struct vm_area_struct *vma;
+    unsigned long start;
+    unsigned long end;
+    u32 npages;
+    u32 *alloc_sz;
+    unsigned long *bitmap;
+};
+
 struct _kgpu_dev {
     struct cdev cdev;
     struct class *cls;
@@ -60,8 +69,8 @@ struct _kgpu_dev {
     struct _kgpu_mempool gmpool;
     spinlock_t gmpool_lock;
 
-    struct vm_area_struct *mmap_vma;
-
+    struct _kgpu_vma vm;
+    spinlock_t vm_lock;
     int state;
 };
 
@@ -317,16 +326,133 @@ void kgpu_vfree(void *p)
 }
 EXPORT_SYMBOL_GPL(kgpu_vfree);
 
-unsigned long kgpu_find_mmap_area(unsigned long size)
+static unsigned long kgpu_alloc_mmap_area(unsigned long size)
 {
-    
-}
-EXPORT_SYMBOL_GPL(kgpu_find_mmap_area);
+    unsigned int n = DIV_ROUND_UP(size, PAGE_SIZE);
+    unsigned long p = 0;
+    unsigned long idx;
 
-void kgpu_map_page(struct page *p, unsigned long mapaddr)
-{
+    spin_lock(&kgpudev.vm_lock);
+
+    idx = bitmap_find_next_zero_area(
+	kgpudev.vm.bitmap,
+	kgpudev.vm.npages,
+	0, n, 0);
+    if (idx < kgpudev.vm.npages) {
+	bitmap_set(kgpudev.vm.bitmap, idx, n);
+	p = kgpudev.vm.start + PAGE_SIZE*idx;
+	kgpudev.vm.alloc_sz[idx] = n;
+    } else {
+	kgpu_log(KGPU_LOG_ERROR, "our of mmap area for mapping\n");
+    }
+
+    spin_unlock(&kgpudev.vm_lock);
+
+    return p;
 }
-EXPORT_SYMBOL_GPL(kgpu_map_page);
+
+static void kgpu_free_mmap_area(unsigned long start)
+{
+    unsigned long idx = (start - kgpudev.vm.start)>>PAGE_SHIFT;
+    unsigned int  n;
+
+    if (idx < 0 || idx >= kgpudev.vm.npages) {
+	kgpu_log(KGPU_LOG_ERROR,
+		 "incorrect GPU mmap pointer 0x%lX to free\n", start);
+	return;
+    }
+
+    n = kgpudev.vm.alloc_sz[idx];
+    if (n > (kgpudev.vm.npages - idx)) {
+	kgpu_log(KGPU_LOG_ERROR,
+		 "incorrect GPU mmap allocation info: "
+		 "allocated %u pages at index %u\n", n, idx);
+	return;
+    }
+    if (n > 0) {
+	spin_lock(&kgpudev.vm_lock);
+	bitmap_clear(kgpudev.vm.bitmap, idx, n);
+	kgpudev.vm.alloc_sz[idx] = 0;
+	spin_unlock(&kgpudev.vm_lock);
+    }
+}
+
+
+/*
+ * This function has a lot of redundent code from kgpu_free_mmap_area,
+ * we are going to remove that one.
+ *
+ * We can either unmap/zap the pte ranges to clear the page table entries,
+ * or just leave them there until the next mapping, which *may*
+ * overwrite page table entries without any problem.
+ */
+void kgpu_unmap_area(unsigned long addr)
+{
+    unsigned long idx = (addr-kgpudev.vm.start)>>PAGE_SHIFT;
+
+    if (idx < 0 || idx >= kgpudev.vm.npages) {
+	kgpu_log(KGPU_LOG_ERROR,
+		 "incorrect GPU mmap pointer 0x%lX to unmap\n",
+		 addr);
+    } else {
+	unsigned int n = kgpudev.vm.alloc_sz[idx];
+	if (n > (kgpudev.vm.npages - idx)) {
+	    kgpu_log(KGPU_LOG_ERROR,
+		     "incorrect GPU mmap allocation info: "
+		     "allocated %u pages at index %u\n", n, idx);
+	    return;
+	}
+	if (n > 0) {
+	    spin_lock(&kgpudev.vm_lock);
+	    bitmap_clear(kgpudev.vm.bitmap, idx, n);
+	    kgpudev.vm.alloc_sz[idx] = 0;
+	    spin_unlock(&kgpudev.vm_lock);
+	    /* no need to check the return value,
+	     * we already did.
+	     */
+	    zap_vma_ptes(kgpudev.vm.vma, addr, n<<PAGE_SHIFT);
+	}
+    }
+}
+EXPORT_SYMBOL_GPL(kgpu_unmap_area);
+
+void *kgpu_map_pfns(unsigned long *pfns, int n)
+{
+    unsigned long addr;
+    int i;
+    int ret;
+
+    addr = kgpu_alloc_mmap_area(n<<PAGE_SHIFT);
+    if (!addr) {
+	return NULL;
+    }
+
+    /*
+     * We assume nobody will compete with us.
+     */
+    /* down_write(kgpudev.vm.vma->vm_mm->mmap_sem); */
+
+    for (i=0; i<n; i++) {
+	ret = remap_pfn_range(kgpudev.vm.vma,
+			      addr+i*(PAGE_SIZE),
+			      pfns[i],
+			      PAGE_SIZE,
+			      kgpudev.vm.vma->vm_page_prot);
+	if (unlikely(ret < 0)) {
+	    kgpu_log(KGPU_LOG_ERROR,
+		     "can't remap pfn %lu, error code %d\n",
+		     pfns[i], ret);
+	    return NULL;
+	}
+    }
+
+    kgpudev.vm.vma->vm_flags &= ~VM_IO;
+
+    /* up_write(kgpudev.vm.vma->vm_mm->mmap_sem) */
+
+    return (void*)addr;
+}
+EXPORT_SYMBOL_GPL(kgpu_map_pfns);
 
 /*
  * find request by id in the rtdreqs
@@ -377,16 +503,33 @@ static void fill_ku_request(struct kgpu_ku_request *kureq,
     kureq->id = req->id;
     memcpy(kureq->service_name, req->service_name, KGPU_SERVICE_NAME_SIZE);
 
-    kureq->in = (void*)ADDR_REBASE(kgpudev.gmpool.uva,
-				   kgpudev.gmpool.kva,
-				   req->in);
-    kureq->out = (void*)ADDR_REBASE(kgpudev.gmpool.uva,
-				   kgpudev.gmpool.kva,
-				   req->out);
-    kureq->data = (void*)ADDR_REBASE(kgpudev.gmpool.uva,
-				   kgpudev.gmpool.kva,
-				   req->udata);
-        
+    if (ADDR_WITHIN(req->in, kgpudev.gmpool.kva,
+		    kgpudev.gmpool.npages<<PAGE_SHIFT)) {
+	kureq->in = (void*)ADDR_REBASE(kgpudev.gmpool.uva,
+				       kgpudev.gmpool.kva,
+				       req->in);
+    } else {
+	kureq->in = req->in;
+    }
+
+    if (ADDR_WITHIN(req->out, kgpudev.gmpool.kva,
+		    kgpudev.gmpool.npages<<PAGE_SHIFT)) {
+	kureq->out = (void*)ADDR_REBASE(kgpudev.gmpool.uva,
+				       kgpudev.gmpool.kva,
+				       req->out);
+    } else {
+	kureq->out = req->out;
+    }
+
+    if (ADDR_WITHIN(req->udata, kgpudev.gmpool.kva,
+		    kgpudev.gmpool.npages<<PAGE_SHIFT)) {
+	kureq->data = (void*)ADDR_REBASE(kgpudev.gmpool.uva,
+				       kgpudev.gmpool.kva,
+				       req->udata);
+    } else {
+	kureq->data = req->udata;
+    }
+    
     kureq->insize = req->insize;
     kureq->outsize = req->outsize;
     kureq->datasize = req->udatasize;
@@ -688,10 +831,27 @@ static void kgpu_vm_close(struct vm_area_struct *vma)
 static int kgpu_vm_fault(struct vm_area_struct *vma,
 			 struct vm_fault *vmf)
 {
+    /*static struct page *p = NULL;
+    if (!p) {
+	p = alloc_page(GFP_KERNEL);
+	if (p) {
+	    kgpu_log(KGPU_LOG_PRINT,
+		     "first page fault, 0x%lX (0x%lX)\n",
+		     TO_UL(vmf->virtual_address),
+		     TO_UL(vma->vm_start));
+	    vmf->page = p;
+	    return 0;
+	} else {
+	    kgpu_log(KGPU_LOG_ERROR,
+		     "first page fault, kgpu mmap no page ");
+	}
+	}*/
     /* should never call this */
     kgpu_log(KGPU_LOG_ERROR,
-	     "kgpu mmap area being accessed without pre-mapping 0x%lX",
-	     (unsigned long)vmf->virtual_address);
+	     "kgpu mmap area being accessed without pre-mapping 0x%lX (0x%lX)\n",
+	     (unsigned long)vmf->virtual_address,
+	     (unsigned long)vma->vm_start);
+    vmf->flags |= VM_FAULT_NOPAGE|VM_FAULT_ERROR;
     return VM_FAULT_SIGBUS;
 }
 
@@ -700,6 +860,34 @@ static struct vm_operations_struct kgpu_vm_ops = {
     .close = kgpu_vm_close,
     .fault = kgpu_vm_fault,
 };
+
+static void set_vm(struct vm_area_struct *vma)
+{
+    kgpudev.vm.vma = vma;
+    kgpudev.vm.start = vma->vm_start;
+    kgpudev.vm.end = vma->vm_end;
+    kgpudev.vm.npages = (vma->vm_end - vma->vm_start)>>PAGE_SHIFT;
+    kgpudev.vm.alloc_sz = kmalloc(
+	sizeof(u32)*kgpudev.vm.npages, GFP_KERNEL);
+    kgpudev.vm.bitmap = kmalloc(
+	BITS_TO_LONGS(kgpudev.vm.npages)*sizeof(long), GFP_KERNEL);
+    if (!kgpudev.vm.alloc_sz || !kgpudev.vm.bitmap) {
+	kgpu_log(KGPU_LOG_ERROR,
+		 "out of memory for vm's bitmap and records\n");
+	if (kgpudev.vm.alloc_sz) kfree(kgpudev.vm.alloc_sz);
+	if (kgpudev.vm.bitmap) kfree(kgpudev.vm.bitmap);
+	kgpudev.vm.alloc_sz = NULL;
+	kgpudev.vm.bitmap = NULL;
+    };	
+}
+
+static void clean_vm(void)
+{
+    if (kgpudev.vm.alloc_sz)
+	kfree(kgpudev.vm.alloc_sz);
+    if (kgpudev.vm.bitmap)
+	kfree(kgpudev.vm.bitmap);
+}
 
 static int kgpu_mmap(struct file *filp, struct vm_area_struct *vma)
 {
@@ -712,7 +900,7 @@ static int kgpu_mmap(struct file *filp, struct vm_area_struct *vma)
     }
     vma->vm_ops = &kgpu_vm_ops;
     vma->vm_flags |= VM_RESERVED;
-    kgpudev.mmap_vma = vma;
+    set_vm(vma);
     return 0;
 }
 
@@ -744,7 +932,10 @@ static int kgpu_init(void)
 
     spin_lock_init(&(kgpudev.ridlock));
     spin_lock_init(&(kgpudev.gmpool_lock));
+    spin_lock_init(&(kgpudev.vm_lock));
 
+    memset(&kgpudev.vm, 0, sizeof(struct _kgpu_vma));
+    
     kgpudev.rid_sequence = 0;
 
     kgpu_request_cache = kmem_cache_create(
@@ -833,6 +1024,7 @@ static void kgpu_cleanup(void)
 	kmem_cache_destroy(kgpu_sync_call_data_cache);
 
     clear_gpu_mempool();
+    clean_vm();
 }
 
 static int __init mod_init(void)

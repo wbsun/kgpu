@@ -31,9 +31,10 @@ int mycb(struct kgpu_request *req)
 {
     g_log(KGPU_LOG_PRINT, "REQ ID: %d, RESP CODE: %d, %d\n",
 	   req->id, req->errcode,
-	   ((int*)(req->out))[0]);
+	   ((int*)(req->kdata))[0]);
 
-    kgpu_vfree(req->in);
+    kgpu_unmap_area(TO_UL(req->in));
+    free_page(TO_UL(req->kdata));
     kgpu_free_request(req);
     return 0;
 }
@@ -42,6 +43,8 @@ static int __init minit(void)
 {
     struct kgpu_request* req;
     char *buf;
+    unsigned long pfn;
+    void *ga;
     
     g_log(KGPU_LOG_PRINT, "loaded\n");
 
@@ -51,18 +54,29 @@ static int __init minit(void)
 	return 0;
     }
     
-    buf = (char*)kgpu_vmalloc(PAGE_SIZE);
+    buf = (char*)__get_free_page(GFP_KERNEL);
     if (!buf) {
         g_log(KGPU_LOG_ERROR, "buffer null\n");
 	return 0;
     }
+    pfn = __pa(buf)>>PAGE_SHIFT;
 
-    req->in = buf;
+    ga = kgpu_map_pfns(&pfn, 1);
+    if (!ga) {
+	g_log(KGPU_LOG_ERROR, "mmap error\n");
+	return 0;
+    }
+
+    req->in = ga;
     req->insize = 1024;
-    req->out = buf;/*+1024;*/
+    req->out = ga;/*+1024;*/
     req->outsize = 1024;
+    req->udata = ga;
+    req->udatasize = 1024;
     strcpy(req->service_name, "test_service");
     req->callback = mycb;
+
+    req->kdata = buf;
 
     ((int*)(buf))[0] = 100;
 

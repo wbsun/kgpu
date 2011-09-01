@@ -40,14 +40,14 @@ int test_launch(struct kgpu_service_request *sr)
 
 int test_prepare(struct kgpu_service_request *sr)
 {
-    cudaStream_t s = (cudaStream_t)(sr->stream);//get_stream(sr->stream_id);
+    cudaStream_t s = (cudaStream_t)(sr->stream);//gpu_get_stream(sr->stream_id);
     csc( ah2dcpy( sr->din, sr->hin, sr->insize, s) );
     return 0;
 }
 
 int test_post(struct kgpu_service_request *sr)
 {
-    cudaStream_t s = (cudaStream_t)(sr->stream);//get_stream(sr->stream_id);
+    cudaStream_t s = (cudaStream_t)(sr->stream);//gpu_get_stream(sr->stream_id);
     csc( ad2hcpy( sr->hout, sr->dout, sr->outsize, s) );
     return 0;
 }

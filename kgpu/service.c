@@ -42,7 +42,7 @@ static struct _kgpu_sitem *lookup_kgpu_sitem(const char *name)
     return NULL;    
 }
 
-struct kgpu_service *kgpu_lookup_service(const char *name)
+struct kgpu_service *kh_lookup_service(const char *name)
 {
     struct _kgpu_sitem *i = lookup_kgpu_sitem(name);
     if (!i)
@@ -50,7 +50,7 @@ struct kgpu_service *kgpu_lookup_service(const char *name)
     return i->s;
 }
 
-int kgpu_register_service(struct kgpu_service *s, void *libhandle)
+int kh_register_service(struct kgpu_service *s, void *libhandle)
 {
     struct _kgpu_sitem *i;
 
@@ -80,12 +80,12 @@ static int __unregister_service(struct _kgpu_sitem *i)
     return 0;
 }
 
-int kgpu_unregister_service(const char *name)
+int kh_unregister_service(const char *name)
 {
     return __unregister_service(lookup_kgpu_sitem(name));    
 }
 
-int kgpu_load_service(const char *libpath)
+int kh_load_service(const char *libpath)
 {
     void *lh;
     fn_init_service init;
@@ -107,7 +107,7 @@ int kgpu_load_service(const char *libpath)
 		    libpath, ((err=dlerror()) == NULL?"": err));
 	    dlclose(lh);
 	} else {
-	    if (init(lh, kgpu_register_service))
+	    if (init(lh, kh_register_service))
 	    {
 		fprintf(stderr,
 			"Warning: %s failed to register service\n",
@@ -121,7 +121,7 @@ int kgpu_load_service(const char *libpath)
     return r;
 }
 
-int kgpu_load_all_services(const char *dir)
+int kh_load_all_services(const char *dir)
 {
     char path[256];
     int i;
@@ -136,7 +136,7 @@ int kgpu_load_all_services(const char *dir)
     for (i=0; i<glb.gl_pathc; i++)
     {
 	libpath = glb.gl_pathv[i];
-	e += kgpu_load_service(libpath);
+	e += kh_load_service(libpath);
     }
 
     globfree(&glb);
@@ -157,7 +157,7 @@ static int __unload_service(struct _kgpu_sitem* i)
 	finit = (fn_finit_service)dlsym(lh, SERVICE_FINIT);
 	if (finit)
 	{
-	    if (finit(lh, kgpu_unregister_service))
+	    if (finit(lh, kh_unregister_service))
 	    {
 		fprintf(stderr,
 			"Warning: failed to unregister service %s\n",
@@ -178,12 +178,12 @@ static int __unload_service(struct _kgpu_sitem* i)
     return r;
 }
 
-int kgpu_unload_service(const char *name)
+int kh_unload_service(const char *name)
 {
     return __unload_service(lookup_kgpu_sitem(name));
 }
 
-int kgpu_unload_all_services()
+int kh_unload_all_services()
 {
     struct list_head *p, *n;
     int e=0;

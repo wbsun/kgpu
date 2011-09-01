@@ -12,9 +12,15 @@
 #ifndef __KGPU_H__
 #define __KGPU_H__
 
+#define TO_UL(v) ((unsigned long)(v))
+
+#define ADDR_WITHIN(pointer, base, size)		\
+    (TO_UL(pointer) > TO_UL(base) &&			\
+     (TO_UL(pointer) < TO_UL(base)+TO_UL(size)))
+
 #define ADDR_REBASE(dst_base, src_base, pointer)			\
-    (((unsigned long)(dst_base)) + (					\
-	((unsigned long)(pointer))-((unsigned long)(src_base))))
+    (TO_UL(dst_base) + (						\
+	TO_UL(pointer)-TO_UL(src_base)))
 
 struct kgpu_gpu_mem_info {
     void *uva;
@@ -50,7 +56,7 @@ struct kgpu_ku_response {
 #define KGPU_BUF_NR 1
 #define KGPU_BUF_SIZE (1024*1024*1024)
 
-#define KGPU_MMAP_SIZE (2*KGPU_BUF_SIZE)
+#define KGPU_MMAP_SIZE KGPU_BUF_SIZE
 
 #define KGPU_DEV_NAME "kgpu"
 
@@ -134,6 +140,9 @@ extern void kgpu_free_request(struct kgpu_request*);
 
 extern void *kgpu_vmalloc(unsigned long nbytes);
 extern void kgpu_vfree(void* p);
+
+extern void *kgpu_map_pfns(unsigned long *pfns, int n);
+extern void kgpu_unmap_area(unsigned long addr);
 
 #endif /* __KERNEL__ */
 

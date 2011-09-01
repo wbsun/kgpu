@@ -12,31 +12,44 @@
 
 #include "kgpu.h"
 
-#define kgpu_log(level, ...) kgpu_do_log(level, "helper", ##__VA_ARGS__)
-#define dbg(...) kgpu_log(KGPU_LOG_DEBUG, ##__VA_ARGS__)
+#define kh_log(level, ...) kgpu_do_log(level, "helper", ##__VA_ARGS__)
+#define dbg(...) kh_log(KGPU_LOG_DEBUG, ##__VA_ARGS__)
 
 extern struct kgpu_gpu_mem_info hostbuf;
+extern struct kgpu_gpu_mem_info hostvma;
 extern struct kgpu_gpu_mem_info devbuf;
+extern struct kgpu_gpu_mem_info devbuf4vma;
+
+#define __round_mask(x, y) ((__typeof__(x))((y)-1))
+#define round_up(x, y) ((((x)-1) | __round_mask(x, y))+1)
+#define round_down(x, y) ((x) & ~__round_mask(x, y))
+
+#ifndef PAGE_SIZE
+#define PAGE_SIZE 4096
+#endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-    void init_gpu(void);
-    void finit_gpu(void);
+    void gpu_init(void);
+    void gpu_finit(void);
 
-    void *alloc_pinned_mem(unsigned long size);
-    void free_pinned_mem(void *p);
+    void *gpu_alloc_pinned_mem(unsigned long size);
+    void gpu_free_pinned_mem(void *p);
 
-    int alloc_gpu_mem(struct kgpu_service_request *sreq);
-    void free_gpu_mem(struct kgpu_service_request *sreq);
-    int alloc_stream(struct kgpu_service_request *sreq);
-    void free_stream(struct kgpu_service_request *sreq);
+    void gpu_pin_mem(void *p, size_t sz);
+    void gpu_unpin_mem(void *p);
 
-    int execution_finished(struct kgpu_service_request *sreq);
-    int post_finished(struct kgpu_service_request *sreq);
+    int gpu_alloc_device_mem(struct kgpu_service_request *sreq);
+    void gpu_free_device_mem(struct kgpu_service_request *sreq);
+    int gpu_alloc_stream(struct kgpu_service_request *sreq);
+    void gpu_free_stream(struct kgpu_service_request *sreq);
 
-    unsigned long get_stream(int sid);
+    int gpu_execution_finished(struct kgpu_service_request *sreq);
+    int gpu_post_finished(struct kgpu_service_request *sreq);
+
+    unsigned long gpu_get_stream(int sid);
 
 #ifdef __cplusplus
 }

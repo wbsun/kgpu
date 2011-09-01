@@ -147,7 +147,7 @@ int gaes_ecb_launch_bp4t(struct kgpu_service_request *sr)
 
 int gaes_ecb_prepare(struct kgpu_service_request *sr)
 {
-    cudaStream_t s = (cudaStream_t)(sr->stream);//get_stream(sr->stream_id);
+    cudaStream_t s = (cudaStream_t)(sr->stream);//gpu_get_stream(sr->stream_id);
     
     csc( ah2dcpy( sr->din, sr->hin, sr->insize, s) );
     
@@ -156,7 +156,7 @@ int gaes_ecb_prepare(struct kgpu_service_request *sr)
 
 int gaes_ecb_post(struct kgpu_service_request *sr)
 {
-    cudaStream_t s = (cudaStream_t)(sr->stream);//get_stream(sr->stream_id);
+    cudaStream_t s = (cudaStream_t)(sr->stream);//gpu_get_stream(sr->stream_id);
 
     csc( ad2hcpy( sr->hout, sr->dout, sr->outsize, s) );
     

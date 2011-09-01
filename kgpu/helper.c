@@ -32,8 +32,9 @@ struct _kgpu_sritem {
 static int devfd;
 
 struct kgpu_gpu_mem_info hostbuf;
+struct kgpu_gpu_mem_info hostvma;
 
-volatile int loop_continue = 1;
+volatile int kh_loop_continue = 1;
 
 static char *service_lib_dir;
 static char *kgpudev;
@@ -73,22 +74,30 @@ static void dump_hex(u8* p, int rs, int cs)
     }
 }
 
-static int init_kgpu(void)
+static int kh_init(void)
 {
     int  i, len, r;
     
     devfd = ssc(open(kgpudev, O_RDWR));
 
     /* alloc GPU Pinned memory buffers */
-    /* for (i=0; i<KGPU_BUF_NR; i++) { */
-	hostbuf.uva = (void*)alloc_pinned_mem(KGPU_BUF_SIZE);
-	hostbuf.size = KGPU_BUF_SIZE;
-	dbg("%p \n", hostbuf.uva);
-	memset(hostbuf.uva, 0, KGPU_BUF_SIZE);
-	ssc( mlock(hostbuf.uva, KGPU_BUF_SIZE));
-    /* } */
+    hostbuf.uva = (void*)gpu_alloc_pinned_mem(KGPU_BUF_SIZE);
+    hostbuf.size = KGPU_BUF_SIZE;
+    dbg("%p \n", hostbuf.uva);
+    memset(hostbuf.uva, 0, KGPU_BUF_SIZE);
+    ssc( mlock(hostbuf.uva, KGPU_BUF_SIZE));
 
-	init_gpu();
+    gpu_init();
+
+    hostvma.uva = (void*)mmap(
+	NULL, KGPU_BUF_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_LOCKED, devfd, 0);
+    hostvma.size = KGPU_BUF_SIZE;
+    if (hostvma.uva == MAP_FAILED) {
+	kh_log(KGPU_LOG_ERROR,
+		 "set up mmap area failed\n");
+	perror("mmap for GPU");
+	abort();
+    }
     
     len = sizeof(struct kgpu_gpu_mem_info);
 
@@ -103,27 +112,26 @@ static int init_kgpu(void)
 }
 
 
-static int finit_kgpu(void)
+static int kh_finit(void)
 {
     int i;
 
     ioctl(devfd, KGPU_IOC_SET_STOP);
     close(devfd);
-    finit_gpu();
+    gpu_finit();
 
-    /* for (i=0; i<KGPU_BUF_NR; i++) { */
-	free_pinned_mem(hostbuf.uva);
-    /* } */
+    gpu_free_pinned_mem(hostbuf.uva);
+
     return 0;
 }
 
-static int send_kgpu_ku_response(struct kgpu_ku_response *resp)
+static int kh_send_response(struct kgpu_ku_response *resp)
 {
     ssc(write(devfd, resp, sizeof(struct kgpu_ku_response)));
     return 0;
 }
 
-static void fail_request(struct _kgpu_sritem *sreq, int serr)
+static void kh_fail_request(struct _kgpu_sritem *sreq, int serr)
 {
     sreq->sr.state = KGPU_REQ_DONE;
     sreq->sr.errcode = serr;
@@ -131,7 +139,7 @@ static void fail_request(struct _kgpu_sritem *sreq, int serr)
     list_add_tail(&sreq->list, &done_reqs);
 }
 
-static struct _kgpu_sritem *alloc_kgpu_service_request()
+static struct _kgpu_sritem *kh_alloc_service_request()
 {
     struct _kgpu_sritem *s = (struct _kgpu_sritem *)
 	malloc(sizeof(struct _kgpu_sritem));
@@ -143,12 +151,12 @@ static struct _kgpu_sritem *alloc_kgpu_service_request()
     return s;
 }
 
-static void free_kgpu_service_request(struct _kgpu_sritem *s)
+static void kh_free_service_request(struct _kgpu_sritem *s)
 {
     free(s);
 }
 
-static void init_kgpu_service_request(struct _kgpu_sritem *item,
+static void kh_init_service_request(struct _kgpu_sritem *item,
 			       struct kgpu_ku_request *kureq)
 {
     dbg("get request %d %s\n", kureq->id, kureq->service_name);
@@ -164,10 +172,10 @@ static void init_kgpu_service_request(struct _kgpu_sritem *item,
     item->sr.outsize = kureq->outsize;
     item->sr.datasize = kureq->datasize;
     item->sr.stream_id = -1;
-    item->sr.s = kgpu_lookup_service(kureq->service_name);
+    item->sr.s = kh_lookup_service(kureq->service_name);
     if (!item->sr.s) {
 	dbg("can't find service\n");
-	fail_request(item, KGPU_NO_SERVICE);
+	kh_fail_request(item, KGPU_NO_SERVICE);
     } else {
 	item->sr.s->compute_size(&item->sr);
 	item->sr.state = KGPU_REQ_INIT;
@@ -177,15 +185,13 @@ static void init_kgpu_service_request(struct _kgpu_sritem *item,
     }
 }
 
-static int get_next_kgpu_service_request(void)
+static int kh_get_next_service_request(void)
 {
     int err;
     struct pollfd pfd;
 
     struct _kgpu_sritem *sreq;
     struct kgpu_ku_request kureq;
-
-    /* dbg("read is %s\n", list_empty(&all_reqs)?"blocking":"non-blocking"); */
 
     pfd.fd = devfd;
     pfd.events = POLLIN;
@@ -196,7 +202,7 @@ static int get_next_kgpu_service_request(void)
 	return -1;
     } else if (err == 1 && pfd.revents & POLLIN)
     {
-	sreq = alloc_kgpu_service_request();
+	sreq = kh_alloc_service_request();
     
 	if (!sreq)
 	    return -1;
@@ -204,14 +210,14 @@ static int get_next_kgpu_service_request(void)
 	err = read(devfd, (char*)(&kureq), sizeof(struct kgpu_ku_request));
 	if (err <= 0) {
 	    if (errno == EAGAIN || err == 0) {
-		free_kgpu_service_request(sreq);
+		kh_free_service_request(sreq);
 		return -1;
 	    } else {
 		perror("Read request.");
 		abort();
 	    }
 	} else {
-	    init_kgpu_service_request(sreq, &kureq);	
+	    kh_init_service_request(sreq, &kureq);	
 	    return 0;
 	}
     } else {
@@ -225,9 +231,9 @@ static int get_next_kgpu_service_request(void)
     }    
 }
 
-static int kgpu_service_request_alloc_mem(struct _kgpu_sritem *sreq)
+static int kh_request_alloc_mem(struct _kgpu_sritem *sreq)
 {
-    int r = alloc_gpu_mem(&sreq->sr);
+    int r = gpu_alloc_device_mem(&sreq->sr);
     if (r) {
 	return -1;
     } else {
@@ -238,17 +244,17 @@ static int kgpu_service_request_alloc_mem(struct _kgpu_sritem *sreq)
     }
 }
 
-static int prepare_exec(struct _kgpu_sritem *sreq)
+static int kh_prepare_exec(struct _kgpu_sritem *sreq)
 {
     int r;
-    if (alloc_stream(&sreq->sr)) {
+    if (gpu_alloc_stream(&sreq->sr)) {
 	r = -1;
     } else {
 	r = sreq->sr.s->prepare(&sreq->sr);
 	
 	if (r) {
 	    dbg("%d fails prepare\n", sreq->sr.id);
-	    fail_request(sreq, r);
+	    kh_fail_request(sreq, r);
 	} else {
 	    dbg("%d done prepare\n", sreq->sr.id);
 	    sreq->sr.state = KGPU_REQ_PREPARED;
@@ -260,12 +266,12 @@ static int prepare_exec(struct _kgpu_sritem *sreq)
     return r;
 }
 	
-static int launch_exec(struct _kgpu_sritem *sreq)
+static int kh_launch_exec(struct _kgpu_sritem *sreq)
 {
     int r = sreq->sr.s->launch(&sreq->sr);
     if (r) {
 	dbg("%d fails launch\n", sreq->sr.id);
-	fail_request(sreq, r);	
+	kh_fail_request(sreq, r);	
     } else {
 	dbg("%d done launch\n", sreq->sr.id);
 	sreq->sr.state = KGPU_REQ_RUNNING;
@@ -275,10 +281,10 @@ static int launch_exec(struct _kgpu_sritem *sreq)
     return 0;
 }
 
-static int post_exec(struct _kgpu_sritem *sreq)
+static int kh_post_exec(struct _kgpu_sritem *sreq)
 {
     int r = 1;
-    if (execution_finished(&sreq->sr)) {
+    if (gpu_execution_finished(&sreq->sr)) {
 	dbg("%d done exec\n", sreq->sr.id);
 	if (!(r = sreq->sr.s->post(&sreq->sr))) {
 	    dbg("%d done post\n", sreq->sr.id);
@@ -288,16 +294,16 @@ static int post_exec(struct _kgpu_sritem *sreq)
 	}
 	else {
 	    dbg("%d fails post\n", sreq->sr.id);
-	    fail_request(sreq, r);
+	    kh_fail_request(sreq, r);
 	}
     }
 
     return r;
 }
 
-static int finish_post(struct _kgpu_sritem *sreq)
+static int kh_finish_post(struct _kgpu_sritem *sreq)
 {
-    if (post_finished(&sreq->sr)) {
+    if (gpu_post_finished(&sreq->sr)) {
 	dbg("%d done finish post\n", sreq->sr.id);
 	sreq->sr.state = KGPU_REQ_DONE;
 	list_del(&sreq->list);
@@ -309,7 +315,7 @@ static int finish_post(struct _kgpu_sritem *sreq)
     return 1;
 }
 
-static int service_done(struct _kgpu_sritem *sreq)
+static int kh_service_done(struct _kgpu_sritem *sreq)
 {
     struct kgpu_ku_response resp;
 
@@ -318,17 +324,17 @@ static int service_done(struct _kgpu_sritem *sreq)
     
     dbg("%d all done\n", sreq->sr.id);
 
-    send_kgpu_ku_response(&resp);
+    kh_send_response(&resp);
     
     list_del(&sreq->list);
     list_del(&sreq->glist);
-    free_gpu_mem(&sreq->sr);
-    free_stream(&sreq->sr);   
-    free_kgpu_service_request(sreq);
+    gpu_free_device_mem(&sreq->sr);
+    gpu_free_stream(&sreq->sr);   
+    kh_free_service_request(sreq);
     return 0;
 }
 
-static int __process_request(int (*op)(struct _kgpu_sritem *),
+static int __kh_process_request(int (*op)(struct _kgpu_sritem *),
 			      struct list_head *lst, int once)
 {
     struct list_head *pos, *n;
@@ -343,17 +349,17 @@ static int __process_request(int (*op)(struct _kgpu_sritem *),
     return r;	
 }
 
-static int main_loop()
+static int kh_main_loop()
 {    
-    while (loop_continue)
+    while (kh_loop_continue)
     {
-	__process_request(service_done, &done_reqs, 0);
-	__process_request(finish_post, &post_exec_reqs, 0);
-	__process_request(post_exec, &running_reqs, 1);
-	__process_request(launch_exec, &prepared_reqs, 1);
-	__process_request(prepare_exec, &memdone_reqs, 1);
-	__process_request(kgpu_service_request_alloc_mem, &init_reqs, 0);
-	get_next_kgpu_service_request();	
+	__kh_process_request(kh_service_done, &done_reqs, 0);
+	__kh_process_request(kh_finish_post, &post_exec_reqs, 0);
+	__kh_process_request(kh_post_exec, &running_reqs, 1);
+	__kh_process_request(kh_launch_exec, &prepared_reqs, 1);
+	__kh_process_request(kh_prepare_exec, &memdone_reqs, 1);
+	__kh_process_request(kh_request_alloc_mem, &init_reqs, 0);
+	kh_get_next_service_request();	
     }
 
     return 0;
@@ -390,9 +396,9 @@ int main(int argc, char *argv[])
 	}
     }
     
-    init_kgpu();
-    kgpu_load_all_services(service_lib_dir);
-    main_loop();
-    finit_kgpu();
+    kh_init();
+    kh_load_all_services(service_lib_dir);
+    kh_main_loop();
+    kh_finit();
     return 0;
 }

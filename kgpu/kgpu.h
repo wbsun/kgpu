@@ -142,6 +142,7 @@ extern void *kgpu_vmalloc(unsigned long nbytes);
 extern void kgpu_vfree(void* p);
 
 extern void *kgpu_map_pfns(unsigned long *pfns, int n);
+extern void *kgpu_map_pages(struct page **pages, int n);
 extern void kgpu_unmap_area(unsigned long addr);
 
 #endif /* __KERNEL__ */

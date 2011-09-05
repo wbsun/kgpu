@@ -75,6 +75,9 @@ extern "C" int init_service(void *lh, int (*reg_srv)(struct kgpu_service*, void*
     int err;
     printf("[libsrv_raid6_pa] Info: init raid6_pq service\n");
 
+    csc( cudaFuncSetCacheConfig(raid6_pq, cudaFuncCachePreferL1) );
+    csc( cudaFuncSetCacheConfig(raid6_recov_2data, cudaFuncCachePreferL1) );
+
     sprintf(raid6_pq_srv.name, "raid6_pq");
     raid6_pq_srv.sid = 0;
     raid6_pq_srv.compute_size = raid6_pq_compute_size;

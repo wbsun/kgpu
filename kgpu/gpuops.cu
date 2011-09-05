@@ -46,12 +46,8 @@ void gpu_init()
 {
     int i;
 
-    // csc(cudaHostGetDevicePointer((void**)(&devbuf.uva),
-				 // (void*)(hostbuf.uva), 0));
-    // for (i=0; i< KGPU_BUF_NR; i++) {
     devbuf.uva = alloc_dev_mem(KGPU_BUF_SIZE);
     devbuf4vma.uva = alloc_dev_mem(KGPU_BUF_SIZE);
-    // }
 
     for (i=0; i<MAX_STREAM_NR; i++) {
         csc( cudaStreamCreate(&streams[i]) );
@@ -63,10 +59,9 @@ void gpu_finit()
 {
     int i;
 
-    // for (i=0; i<KGPU_BUF_NR; i++) {
     free_dev_mem(devbuf.uva);
     free_dev_mem(devbuf4vma.uva);
-    // }
+
     for (i=0; i<MAX_STREAM_NR; i++) {
 	csc( cudaStreamDestroy(streams[i]));
     }
@@ -124,7 +119,93 @@ int gpu_post_finished(struct kgpu_service_request *sreq)
     return __check_stream_done(s);
 }
 
+#define min(a,b) (((a)<(b))?(a):(b))
+#define max(a,b) (((a)>(b))?(a):(b))
+
+static int __merge_2ranges(
+	unsigned long r1, unsigned long s1, unsigned long r2, unsigned long s2,
+	unsigned long *e, unsigned long *s) 
+{
+    // r1   r2
+    if (r1 < r2) {
+        if (r1+s1 >= r2) {
+            *e = r1;
+            *s = max(r1+s1, r2+s2) - r1;
+            return 1;
+        }
+        
+        return 0;
+    } else if (r1 == r2) {
+        *e = r1;
+        *s = max(s1, s2);
+        return 1;
+    } else {
+        // r2  r1
+        if (r2+s2 >= r1) {
+            *e = r2;
+            *s = max(r1+s1, r2+s2) - r2;
+            return 1;
+        }
+        
+        return 0;
+    }
+}
+
+
+static int __merge_ranges(unsigned long ad[], unsigned long sz[], int n)
+{
+    int i;
+    
+    for (i=0; i<n; i++) {
+    	ad[i] = round_down(ad[i], PAGE_SIZE);
+    	sz[i] = round_up(sz[i], PAGE_SIZE);
+    }
+    
+    switch(n) {
+    	case 0:
+    	    return 0;
+    	case 1:
+    	    return 1;
+    	case 2:
+    	    if (__merge_2ranges(ad[0], sz[0], ad[1], sz[1], &ad[0], &sz[0]))
+    	        return 1;
+    	    else
+    	        return 2;
+    	case 3:
+    	    if (__merge_2ranges(ad[0], sz[0], ad[1], sz[1], &ad[0], &sz[0])) {
+    	        if (__merge_2ranges(ad[0], sz[0], ad[2], sz[2], &ad[0], &sz[0])) {
+    	            return 1;
+    	        } else {
+    	            ad[1] = ad[2];
+    	            sz[1] = sz[2];
+    	            return 2;
+    	        }
+    	    } else if (__merge_2ranges(ad[0], sz[0], ad[2], sz[2], &ad[0], &sz[0])) {
+    	        if (__merge_2ranges(ad[0], sz[0], ad[1], sz[1], &ad[0], &sz[0])) {
+    	            return 1;
+    	        } else
+    	            return 2;
+    	    } else if (__merge_2ranges(ad[2], sz[2], ad[1], sz[1], &ad[1], &sz[1])) {
+    	        if (__merge_2ranges(ad[0], sz[0], ad[1], sz[1], &ad[0], &sz[0]))
+    	            return 1;
+    	        else
+    	            return 2;
+    	    } else
+    	        return 3;
+    	    
+    	    break;
+    	default:
+    	    return 0;
+    }
+    
+    // should never reach here
+    return 0;
+}
+
 /*
+ * A little bit old policy, but may give you a brief pic of what
+ * K-U mm does.
+ *
  * Allocation policy is simple here: copy what the kernel part does
  * for the GPU memory. This works because:
  *   - GPU memory and host memory are identical in size
@@ -137,14 +218,19 @@ int gpu_post_finished(struct kgpu_service_request *sreq)
  */
 int gpu_alloc_device_mem(struct kgpu_service_request *sreq)
 {
+    unsigned long pin_addr[3] = {0,0,0}, pin_sz[3] = {0,0,0};
+    int npins = 0, i;
+    
     if (ADDR_WITHIN(sreq->hin, hostbuf.uva, hostbuf.size))
 	sreq->din =
 	    (void*)ADDR_REBASE(devbuf.uva, hostbuf.uva, sreq->hin);
     else {
 	sreq->din =
 	    (void*)ADDR_REBASE(devbuf4vma.uva, hostvma.uva, sreq->hin);
-	
-	gpu_pin_mem(sreq->hin, sreq->insize);
+
+	pin_addr[npins] = TO_UL(sreq->hin);
+	pin_sz[npins] = sreq->insize;
+	npins++;
     }
 
     if (ADDR_WITHIN(sreq->hout, hostbuf.uva, hostbuf.size))
@@ -153,20 +239,27 @@ int gpu_alloc_device_mem(struct kgpu_service_request *sreq)
     else {
 	sreq->dout =
 	    (void*)ADDR_REBASE(devbuf4vma.uva, hostvma.uva, sreq->hout);
-	if (!ADDR_WITHIN(sreq->hout, sreq->hin, sreq->insize))
-	    gpu_pin_mem(sreq->hout, sreq->outsize);
+
+	pin_addr[npins] = TO_UL(sreq->hout);
+	pin_sz[npins] = sreq->outsize;
+	npins++;
     }
 
     if (ADDR_WITHIN(sreq->hdata, hostbuf.uva, hostbuf.size))
 	sreq->ddata =
 	    (void*)ADDR_REBASE(devbuf.uva, hostbuf.uva, sreq->hdata);
-    else {
+    else if (ADDR_WITHIN(sreq->hdata, hostvma.uva, hostvma.size)){
 	sreq->ddata =
 	    (void*)ADDR_REBASE(devbuf4vma.uva, hostvma.uva, sreq->hdata);
-	if (!ADDR_WITHIN(sreq->hdata, sreq->hin, sreq->insize)
-	    && !ADDR_WITHIN(sreq->hdata, sreq->hout, sreq->outsize)
-	    && sreq->hdata && sreq->datasize) 
-	    gpu_pin_mem(sreq->hdata, sreq->datasize);
+
+	pin_addr[npins] = TO_UL(sreq->hdata);
+	pin_sz[npins] = sreq->datasize;
+	npins++;
+    }
+    
+    npins = __merge_ranges(pin_addr, pin_sz, npins);
+    for (i=0; i<npins; i++) {
+    	gpu_pin_mem((void*)pin_addr[i], pin_sz[i]);
     }
 
     return 0;
@@ -174,9 +267,33 @@ int gpu_alloc_device_mem(struct kgpu_service_request *sreq)
 
 void gpu_free_device_mem(struct kgpu_service_request *sreq)
 {
+    unsigned long pin_addr[3] = {0,0,0}, pin_sz[3] = {0,0,0};
+    int npins = 0, i;
+    
     sreq->din = NULL;
     sreq->dout = NULL;
-    sreq->ddata = NULL;
+    sreq->ddata = NULL;   
+    
+    if (ADDR_WITHIN(sreq->hin, hostvma.uva, hostvma.size)) {
+    	pin_addr[npins] = TO_UL(sreq->hin);
+	pin_sz[npins] = sreq->insize;
+	npins++;
+    }
+    if (ADDR_WITHIN(sreq->hout, hostvma.uva, hostvma.size)) {
+    	pin_addr[npins] = TO_UL(sreq->hout);
+	pin_sz[npins] = sreq->outsize;
+	npins++;
+    }
+    if (ADDR_WITHIN(sreq->hdata, hostvma.uva, hostvma.size)) {
+    	pin_addr[npins] = TO_UL(sreq->hdata);
+	pin_sz[npins] = sreq->datasize;
+	npins++;
+    }
+    
+    npins = __merge_ranges(pin_addr, pin_sz, npins);
+    for (i=0; i<npins; i++) {
+    	gpu_unpin_mem((void*)pin_addr[i]);
+    }
 }
 
 int gpu_alloc_stream(struct kgpu_service_request *sreq)

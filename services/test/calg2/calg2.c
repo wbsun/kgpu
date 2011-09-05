@@ -57,6 +57,7 @@ static int __init minit(void)
     buf = (char*)__get_free_page(GFP_KERNEL);
     if (!buf) {
         g_log(KGPU_LOG_ERROR, "buffer null\n");
+	kgpu_free_request(req);
 	return 0;
     }
     pfn = __pa(buf)>>PAGE_SHIFT;
@@ -64,6 +65,8 @@ static int __init minit(void)
     ga = kgpu_map_pfns(&pfn, 1);
     if (!ga) {
 	g_log(KGPU_LOG_ERROR, "mmap error\n");
+	kgpu_free_request(req);
+	free_page(buf);
 	return 0;
     }
 

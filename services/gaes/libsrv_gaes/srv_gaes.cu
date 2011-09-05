@@ -227,6 +227,13 @@ extern "C" int init_service(void *lh, int (*reg_srv)(struct kgpu_service*, void*
 {
     int err;
     printf("[libsrv_gaes] Info: init gaes services\n");
+
+    cudaFuncSetCacheConfig(aes_decrypt_bpt, cudaFuncCachePreferL1);
+    cudaFuncSetCacheConfig(aes_encrypt_bpt, cudaFuncCachePreferL1);
+    cudaFuncSetCacheConfig(aes_decrypt_bp4t, cudaFuncCachePreferL1);
+    cudaFuncSetCacheConfig(aes_encrypt_bp4t, cudaFuncCachePreferL1);
+    cudaFuncSetCacheConfig(aes_ctr_crypt, cudaFuncCachePreferL1);
+    cudaFuncSetCacheConfig(aes_lctr_crypt, cudaFuncCachePreferL1);
     
     sprintf(gaes_ecb_enc_srv.name, "gaes_ecb-enc");
     gaes_ecb_enc_srv.sid = 0;

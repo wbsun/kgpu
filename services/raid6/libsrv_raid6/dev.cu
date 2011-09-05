@@ -15,6 +15,8 @@
 typedef unsigned long u64;
 typedef unsigned char u8;
 
+//#include "table.h"
+
 #define NBYTES(x) ((x) * 0x0101010101010101UL)
 #define NSIZE  8
 #define NSHIFT 3
@@ -22,6 +24,17 @@ typedef unsigned char u8;
 #define SHLBYTE(v) (((v)<<1)&(0xfefefefefefefefe))
 //(((v)<<1)&NBYTES(0xfe))
 #define MASK(v) ({ u64 vv = (v)&(0x8080808080808080); (vv<<1)-(vv>>7); })
+
+__global__ void raid6_recov_2data(
+    u8 *p, u8 *q, u8 *dp, u8 *dq,
+    const u8 *pbmul, const u8 *qmul, size_t bytes)
+{
+    int tid = threadIdx.x+blockDim.x*blockIdx.x;
+    u8 px = p[tid]^dp[tid];
+    u8 qx = qmul[q[tid]^dq[tid]];
+    dq[tid] = pbmul[px]^qx;
+    dp[tid] = dq[tid]^px;
+}
 
 
 /*

@@ -389,7 +389,7 @@ static void kgpu_free_mmap_area(unsigned long start)
 void kgpu_unmap_area(unsigned long addr)
 {
     unsigned long idx = (addr-kgpudev.vm.start)>>PAGE_SHIFT;
-    return; // tmp workaround, this means we will consume the mem very soon...
+    //return; // tmp workaround, this means we will consume the mem very soon...
 
     if (idx < 0 || idx >= kgpudev.vm.npages) {
 	kgpu_log(KGPU_LOG_ERROR,
@@ -404,14 +404,25 @@ void kgpu_unmap_area(unsigned long addr)
 	    return;
 	}
 	if (n > 0) {
+	    int ret;
 	    spin_lock(&kgpudev.vm_lock);
 	    bitmap_clear(kgpudev.vm.bitmap, idx, n);
 	    kgpudev.vm.alloc_sz[idx] = 0;
 	    spin_unlock(&kgpudev.vm_lock);
-	    /* 
+
+
+	    /*
 	     * TODO: XXX: figure out how to remove the inserted pages
 	     */
-	    zap_vma_ptes(kgpudev.vm.vma, addr, n<<PAGE_SHIFT);
+
+	    // This can work, but at high risk, a better way is to hold
+	    // the vma semaphore, but might be slower.
+	    kgpudev.vm.vma->vm_flags |= VM_PFNMAP;
+	    ret = zap_vma_ptes(kgpudev.vm.vma, addr, n<<PAGE_SHIFT);
+	    if (ret)
+		kgpu_log(KGPU_LOG_ALERT,
+			 "zap_vma_ptes returns %d\n", ret);
+	    kgpudev.vm.vma->vm_flags &= ~VM_PFNMAP;
 	}
     }
 }
@@ -439,6 +450,12 @@ static void* map_page_units(void *units, int n, int is_page)
 	    addr+i*PAGE_SIZE,
 	    is_page? ((struct page**)units)[i] : pfn_to_page(((unsigned long*)units)[i])
 	    );
+
+	/*ret = vm_insert_pfn(
+	    kgpudev.vm.vma,
+	    addr+i*PAGE_SIZE,
+	    is_page? page_to_pfn(((struct page**)units)[i]) : ((unsigned long*)units)[i]
+	    );*/
 	
 	if (unlikely(ret < 0)) {
 	    up_write(&kgpudev.vm.vma->vm_mm->mmap_sem);

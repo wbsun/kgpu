@@ -46,9 +46,16 @@ Try it?
     	card, but you should have a NVIDIA card that support CUDA
     	computing capability 2.0 or higher.  If you don't have more
     	than 1G video memory, change KGPU_BUF_SIZE in kgpu/kgpu.h to
-    	make sure KGPU_BUF_NR*KGPU_BUF_SIZE < Size of Your Video
+    	make sure KGPU_BUF_SIZE*2 < Size of Your Video
     	Memory - (x) where the max of x is a value that you need try
     	some times to figure out. Or simply leave x = 64M or 128M.
+
+	Notice a new change: we enabled a new feature to allow
+	KGPU remapping any kernel pages into CUDA page-locked
+	memory, the remapping also need video memory on the GPU
+	side, so now there are two GPU buffers with the same size,
+	which is KGPU_BUF_SIZE. So KGPU_BUF_SIZE should be <=
+	video memory size/2.
 
     Software:
         We compile the CUDA code with nvcc in CUDA 3.2. The OS

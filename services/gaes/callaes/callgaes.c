@@ -28,10 +28,10 @@ char* AES_GPU = "gaes_ecb(aes)";
 
 char* CIPHER;
 
-#define MAX_BLK_SIZE (1*1024*1024)
+#define MAX_BLK_SIZE (4*1024*1024)
 #define MIN_BLK_SIZE (4*1024)
 
-#define TEST_TIMES 1
+#define TEST_TIMES 20
 
 #if 0
 
@@ -154,7 +154,7 @@ void test_aes(void)
 
 		do_gettimeofday(&t0);
 		for (j=0; j<TEST_TIMES; j++) {
-			ret = crypto_blkcipher_encrypt_iv(&desc, dst, src, bs);
+			ret = crypto_blkcipher_encrypt_iv(&desc, dst, dst, bs);
 			if (ret) {
 				printk("taes ERROR: enc error\n");
 				goto free_err_pages;
@@ -166,7 +166,7 @@ void test_aes(void)
 
 		do_gettimeofday(&t0);
 		for (j=0; j<TEST_TIMES; j++) {
-			ret = crypto_blkcipher_decrypt_iv(&desc, src, dst, bs);
+			ret = crypto_blkcipher_decrypt_iv(&desc, src, src, bs);
 			if (ret) {
 				printk("taes ERROR: dec error\n");
 				goto free_err_pages;
@@ -176,8 +176,8 @@ void test_aes(void)
 		dec = 1000000*(t1.tv_sec-t0.tv_sec) + 
 			((int)(t1.tv_usec) - (int)(t0.tv_usec));
 
-		printk("%25s: Size %u, enc %ld, dec %ld\n",
-		       CIPHER, bs, enc, dec);
+		printk("%25s: Size %10u, enc %10ld, BW: %6ldMB/s dec %10ld BW: %6ldMB/s\n",
+		       CIPHER, bs, enc, (bs*TEST_TIMES)/enc, dec, (bs*TEST_TIMES)/dec);
 	}
 	
 	

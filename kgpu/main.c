@@ -326,7 +326,7 @@ void kgpu_vfree(void *p)
 }
 EXPORT_SYMBOL_GPL(kgpu_vfree);
 
-static unsigned long kgpu_alloc_mmap_area(unsigned long size)
+unsigned long kgpu_alloc_mmap_area(unsigned long size)
 {
     unsigned int n = DIV_ROUND_UP(size, PAGE_SIZE);
     unsigned long p = 0;
@@ -350,8 +350,9 @@ static unsigned long kgpu_alloc_mmap_area(unsigned long size)
 
     return p;
 }
+EXPORT_SYMBOL_GPL(kgpu_alloc_mmap_area);
 
-static void kgpu_free_mmap_area(unsigned long start)
+void kgpu_free_mmap_area(unsigned long start)
 {
     unsigned long idx = (start - kgpudev.vm.start)>>PAGE_SHIFT;
     unsigned int  n;
@@ -376,6 +377,7 @@ static void kgpu_free_mmap_area(unsigned long start)
 	spin_unlock(&kgpudev.vm_lock);
     }
 }
+EXPORT_SYMBOL_GPL(kgpu_free_mmap_area);
 
 
 /*
@@ -428,6 +430,23 @@ void kgpu_unmap_area(unsigned long addr)
 }
 EXPORT_SYMBOL_GPL(kgpu_unmap_area);
 
+int kgpu_map_page(struct page *p, unsigned long addr)
+{
+    int ret = 0;
+    down_write(&kgpudev.vm.vma->vm_mm->mmap_sem);
+
+    ret = vm_insert_page(kgpudev.vm.vma, addr, p);
+    if (unlikely(ret < 0)) {
+	kgpu_log(KGPU_LOG_ERROR,
+		 "can't remap pfn %lu, error %d\n",
+		 page_to_pfn(p), ret);
+    }
+
+    up_write(&kgpudev.vm.vma->vm_mm->mmap_sem);
+    return ret;
+}
+EXPORT_SYMBOL_GPL(kgpu_map_page);
+
 static void* map_page_units(void *units, int n, int is_page)
 {
     unsigned long addr;
@@ -450,12 +469,6 @@ static void* map_page_units(void *units, int n, int is_page)
 	    addr+i*PAGE_SIZE,
 	    is_page? ((struct page**)units)[i] : pfn_to_page(((unsigned long*)units)[i])
 	    );
-
-	/*ret = vm_insert_pfn(
-	    kgpudev.vm.vma,
-	    addr+i*PAGE_SIZE,
-	    is_page? page_to_pfn(((struct page**)units)[i]) : ((unsigned long*)units)[i]
-	    );*/
 	
 	if (unlikely(ret < 0)) {
 	    up_write(&kgpudev.vm.vma->vm_mm->mmap_sem);

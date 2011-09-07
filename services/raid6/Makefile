@@ -1,4 +1,4 @@
-SUBDIRS = libsrv_raid6 gpq grecov
+SUBDIRS = libsrv_raid6 gpq #grecov
 
 all: $(SUBDIRS)
 

@@ -1076,10 +1076,10 @@ static void clone_init(struct dm_crypt_io *io, struct bio *clone)
 	clone->bi_destructor = dm_crypt_bio_destructor;
 }
 
-static void kcryptd_unplug(struct crypt_config *cc)
+/*static void kcryptd_unplug(struct crypt_config *cc)
 {
 	blk_unplug(bdev_get_queue(cc->dev->bdev));
-}
+	}*/
 
 static int kcryptd_io_read(struct dm_crypt_io *io, gfp_t gfp)
 {
@@ -1094,7 +1094,7 @@ static int kcryptd_io_read(struct dm_crypt_io *io, gfp_t gfp)
 	 */
 	clone = bio_alloc_bioset(gfp, bio_segments(base_bio), cc->bs);
 	if (!clone) {
-		kcryptd_unplug(cc);
+		/* kcryptd_unplug(cc); */
 		return 1;
 	}
 

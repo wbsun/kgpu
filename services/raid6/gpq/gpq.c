@@ -365,7 +365,12 @@ static void do_benchmark(void)
     long t;
     int i;
     const struct raid6_calls *gcall;
-    const struct raid6_calls *const *rc;
+    const struct raid6_calls **rc;
+
+    if (replace_global)
+	rc = &oldcall;
+    else
+	rc = &raid6_call;
 
     gcall = &raid6_gpq;
 
@@ -400,8 +405,8 @@ static void do_benchmark(void)
 		tsz/t
 	    );
 
-	for (rc = raid6_algos; *rc; rc++) {
-	    if (!(*rc)->valid || (*rc)->valid()) {
+	//for (rc = raid6_algos; *rc; rc++) {
+	//    if (!(*rc)->valid || (*rc)->valid()) {
 		t=0;
 		for (i=0; i<TEST_TIMES; i++) {
 		    t += test_pq(TEST_NDISKS, sz, *rc);		
@@ -415,8 +420,8 @@ static void do_benchmark(void)
 			(*rc)->name,
 			tsz/t
 		    );
-	    }
-	}
+		//   }
+		//}
     }
 }
 

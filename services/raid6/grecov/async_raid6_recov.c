@@ -317,6 +317,46 @@ __2data_recov_n(int disks, size_t bytes, int faila, int failb,
 	return tx;
 }
 
+/*#include <linux/list.h>
+
+struct __r6_2d_request {
+    int disks;
+    size_t bytes;
+    struct page **blocks;
+    int faila, failb;
+    struct list_head list;
+};
+
+struct __r6_2d_data {
+    struct list_head reqs;
+    spinlock_t reqlock;
+};
+
+static struct kmem_cache *r6_2d_request_cache;
+static struct __r6_2d_data gpu_r6_2d_data;
+
+static void init_gpu_system()
+{
+    r6_2d_request_cache = kmem_cache_create(
+	"r6_2d_request_cache",
+	sizeof(struct r6_2d_request), 0,
+	SLAB_HWCACHE_ALIGN, NULL);
+    if (!r6_2d_request_cache) {
+	printk("[async_raid6_recov] Error: can't creat request cache\n");
+	return;
+    }
+
+    spin_lock_init(&gpu_r6_2d_data.reqlock);
+}
+
+static void gpu_async_raid6_2drecov(int disks, size_t bytes,
+				    int faila, int failb,
+				    struct page **blocks)
+{
+    
+}*/
+				    
+
 /**
  * async_raid6_2data_recov - asynchronously calculate two missing data blocks
  * @disks: number of disks in the RAID-6 array

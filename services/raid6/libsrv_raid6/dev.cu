@@ -66,44 +66,6 @@ __global__ void raid6_pq(unsigned int disks, unsigned long dsize, u8 *data)
 }
 
 /*
- * Fixed number of disks version
- * Naming: _fdx, where x is the number of disks, including p and q.
- *
- */
-__global__ void raid6_pq_fd6(unsigned int disks, unsigned long dsize, u8 *data)
-{
-    u64 *d;;
-    int step64, tid;
-
-    u64 wq0, wp0;
-
-    tid = blockDim.x*blockIdx.x+threadIdx.x;
-    step64 = dsize/sizeof(u64);
-    d = ((u64*)data)+tid+3*step64;
-    
-    wq0 = wp0 = *d;
-    d -= step64;
-    
-    wp0 ^= *d;
-    wq0 =
-	SHLBYTE(wq0) ^ (MASK(wq0)&NBYTES(0x1d)) ^ *d;
-    d-= step64;
-    
-    wp0 ^= *d;
-    wq0 =
-	SHLBYTE(wq0) ^ (MASK(wq0)&NBYTES(0x1d)) ^ *d;
-    d -= step64;
-    
-    wp0 ^= *d;
-    wq0 =
-	SHLBYTE(wq0) ^ (MASK(wq0)&NBYTES(0x1d)) ^ *d;
-    d += 4*step64;
-    
-    *d = wp0;
-    *(d+step64) = wq0;
-}
-
-/*
  * PQ with stride
  * @disks: number of disks, p and q included
  * @dsize: unit size, or a stripe?

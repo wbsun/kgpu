@@ -320,12 +320,12 @@ static int crypto_ecb_gpu_crypt(
 
 	if (nparts & 0x1)
 	    nparts++;
-	nparts <<= 1;
+	nparts >>= 1;
 
 	cs = (struct completion*)kmalloc(sizeof(struct completion)*nparts,
 					 GFP_KERNEL);
 	if (cs) {
-	    for(i=0; i<nparts; i++) {
+	    for(i=0; i<nparts && remainings > 0; i++) {
 		init_completion(cs+i);
 		if (zero_copy)
 		    crypto_gaes_ecb_crypt_zc(desc, dst, src,
@@ -341,7 +341,7 @@ static int crypto_ecb_gpu_crypt(
 		remainings -= (async_threshold<<PAGE_SHIFT);
 	    }
 
-	    for (i=0; i<nparts; i++)
+	    for (i--; i>=0; i--)
 		wait_for_completion_interruptible(cs+i);
 	    kfree(cs);
 	    return 0;

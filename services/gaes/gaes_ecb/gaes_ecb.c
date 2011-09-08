@@ -46,10 +46,10 @@ static int zero_copy=0;
 module_param(zero_copy, int, 0);
 MODULE_PARM_DESC(zero_copy, "use GPU mem zero-copy");
 
-static unsigned int async_threshold=256;
-module_param(async_threshold, unsigned int, 256);
-MODULE_PARAM_DESC(async_threshold,
-		  "data size threshold (in # of pages) to invoke async call");
+static int async_threshold=256;
+
+module_param(async_threshold, int, 256);
+MODULE_PARM_DESC(async_threshold, "size(#pages) threshold for async call");
 
 static int
 crypto_gaes_ecb_setkey(
@@ -80,16 +80,16 @@ crypto_gaes_ecb_setkey(
 }
 
 static void __done_cryption(struct blkcipher_desc *desc,
-			    struct scatterlist *dst;
+			    struct scatterlist *dst,
 			    struct scatterlist *src,
-			    unsigend long sz,
+			    unsigned long sz,
 			    char *buf)
 {
     struct blkcipher_walk walk;
     unsigned long nbytes;
 
-    blkcipher_walk_init(&walk, data->dst, data-src, data->sz);
-    blkcipher_walk_virt(data->desc, &walk);
+    blkcipher_walk_init(&walk, dst, src, sz);
+    blkcipher_walk_virt(desc, &walk);
  	
     while ((nbytes = walk.nbytes)) {
 	u8 *wdst = walk.dst.virt.addr;
@@ -311,7 +311,7 @@ static int crypto_ecb_gpu_crypt(
     struct scatterlist *dst, struct scatterlist *src,
     unsigned int nbytes, int enc)
 {
-    if ((nbyets>>PAGE_SHIFT)
+    if ((nbytes>>PAGE_SHIFT)
 	>= (async_threshold+(async_threshold>>1))) {
 	unsigned int remainings = nbytes;
 	int nparts = nbytes/(async_threshold<<(PAGE_SHIFT-1));
@@ -333,7 +333,7 @@ static int crypto_ecb_gpu_crypt(
 					     async_threshold<<PAGE_SHIFT,
 					     enc, cs+i);
 		else
-		    crypto_gaes_ecb_crypt_zc(desc, dst, src,
+		    crypto_gaes_ecb_crypt(desc, dst, src,
 					     (i==nparts-1)?remainings:
 					     async_threshold<<PAGE_SHIFT,
 					     enc, cs+i);

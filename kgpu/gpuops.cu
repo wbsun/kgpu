@@ -192,14 +192,13 @@ static int __merge_ranges(unsigned long ad[], unsigned long sz[], int n)
     	            return 2;
     	    } else
     	        return 3;
-    	    
-    	    break;
+    	   
     	default:
     	    return 0;
     }
     
     // should never reach here
-    return 0;
+    //return 0;
 }
 
 /*

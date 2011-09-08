@@ -10,7 +10,6 @@
  *
  * This cipher is mostly derived from the crypto/ecb.c in Linux kernel tree.
  *
- * The cipher can only handle data with the size of multiples of PAGE_SIZE
  */
 #include <crypto/algapi.h>
 #include <linux/err.h>
@@ -21,6 +20,7 @@
 #include <linux/slab.h>
 #include <crypto/aes.h>
 #include <linux/string.h>
+#include <linux/completion.h>
 #include "../../../kgpu/kgpu.h"
 #include "../gaesk.h"
 
@@ -34,10 +34,22 @@ struct crypto_gaes_ecb_ctx {
     u8 key[32];
 };
 
+struct gaes_ecb_async_data {
+    struct completion *c;
+    struct scatterlist *dst, *src;
+    struct blkcipher_desc *desc;
+    unsigned long sz;
+};
+
 static int zero_copy=0;
 
 module_param(zero_copy, int, 0);
 MODULE_PARM_DESC(zero_copy, "use GPU mem zero-copy");
+
+static unsigned int async_threshold=256;
+module_param(async_threshold, unsigned int, 256);
+MODULE_PARAM_DESC(async_threshold,
+		  "data size threshold (in # of pages) to invoke async call");
 
 static int
 crypto_gaes_ecb_setkey(
@@ -67,12 +79,56 @@ crypto_gaes_ecb_setkey(
     return err;
 }
 
+static void __done_cryption(struct blkcipher_desc *desc,
+			    struct scatterlist *dst;
+			    struct scatterlist *src,
+			    unsigend long sz,
+			    char *buf)
+{
+    struct blkcipher_walk walk;
+    unsigned long nbytes;
+
+    blkcipher_walk_init(&walk, data->dst, data-src, data->sz);
+    blkcipher_walk_virt(data->desc, &walk);
+ 	
+    while ((nbytes = walk.nbytes)) {
+	u8 *wdst = walk.dst.virt.addr;
+	
+	memcpy(wdst, buf, nbytes);
+	buf += nbytes;
+	
+	blkcipher_walk_done(desc, &walk, 0);
+    }
+}
+
+static int async_gpu_callback(struct kgpu_request *req)
+{
+    struct gaes_ecb_async_data *data = (struct gaes_ecb_async_data*)
+	req->kdata;
+
+    if (!zero_copy)
+	__done_cryption(data->desc, data->dst, data->src, data->sz,
+			(char*)req->out);
+
+    complete(data->c);
+
+    if (zero_copy) {
+	kgpu_unmap_area(TO_UL(req->in));
+	free_page(TO_UL(req->udata));
+    } else
+	kgpu_vfree(req->in);
+    kgpu_free_request(req);
+
+    kfree(data);
+    return 0;
+}
+
 static int
 crypto_gaes_ecb_crypt(
     struct blkcipher_desc *desc,
     struct scatterlist *dst, struct scatterlist *src,
     unsigned int sz,
-    int enc)
+    int enc, struct completion *c)
 {
     int err=0;
     size_t rsz = roundup(sz, PAGE_SIZE);
@@ -105,15 +161,6 @@ crypto_gaes_ecb_crypt(
     req->udatasize = sizeof(struct crypto_aes_ctx);
     req->udata = buf+rsz;
 
-    /*nbytes = sg_copy_to_buffer(src, rsz>>PAGE_SHIFT, buf, sz);
-    if (nbytes != sz) {
-	g_log(KGPU_LOG_ERROR,
-	      "incorrect copy from src, %lu %lu\n",
-	      TO_UL(nbytes), TO_UL(sz));
-	err = -EFAULT;
-	goto get_out;
-	}*/
-
     blkcipher_walk_init(&walk, dst, src, sz);
     err = blkcipher_walk_virt(desc, &walk);
 
@@ -129,36 +176,34 @@ crypto_gaes_ecb_crypt(
     memcpy(req->udata, &(ctx->aes_ctx), sizeof(struct crypto_aes_ctx));   
     strcpy(req->service_name, enc?"gaes_ecb-enc":"gaes_ecb-dec");
 
-    if (kgpu_call_sync(req)) {
-	err = -EFAULT;
-	g_log(KGPU_LOG_ERROR, "callgpu error\n");
-    } else {
-	/*nbytes = sg_copy_from_buffer(dst, rsz>>PAGE_SHIFT, req->out, sz);
-	if (nbytes != sz) {
-	    g_log(KGPU_LOG_ERROR,
-		  "incorrect copy from src, %lu %lu\n",
-		  TO_UL(nbytes), TO_UL(sz));
-	    err = -EFAULT;
-	    goto get_out;
-	    }*/
+    if (c) {
+	struct gaes_ecb_async_data *adata =
+	    kmalloc(sizeof(struct gaes_ecb_async_data), GFP_KERNEL);
+	if (!adata) {
+	    g_log(KGPU_LOG_ERROR, "out of mem for async data\n");
+	    // TODO: do something here
+	} else {
+	    req->callback = async_gpu_callback;
+	    req->kdata = adata;
 
-	blkcipher_walk_init(&walk, dst, src, sz);
-	err = blkcipher_walk_virt(desc, &walk);
-	buf = (char*)req->out;
- 	
-	while ((nbytes = walk.nbytes)) {
-	    u8 *wdst = walk.dst.virt.addr;
-
-	    memcpy(wdst, buf, nbytes);
-	    buf += nbytes;
-	    
-	    err = blkcipher_walk_done(desc, &walk, 0);
+	    adata->c = c;
+	    adata->dst = dst;
+	    adata->src = src;
+	    adata->desc = desc;
+	    adata->sz = sz;
+	    kgpu_call_async(req);
+	    return 0;
 	}
+    } else {
+	if (kgpu_call_sync(req)) {
+	    err = -EFAULT;
+	    g_log(KGPU_LOG_ERROR, "callgpu error\n");
+	} else {
+	    __done_cryption(desc, dst, src, sz, (char*)req->out);
+	}
+	kgpu_vfree(req->in);
+	kgpu_free_request(req); 
     }
-    
-get_out:
-    kgpu_vfree(req->in);
-    kgpu_free_request(req);
     
     return err;
 }
@@ -168,7 +213,7 @@ crypto_gaes_ecb_crypt_zc(
     struct blkcipher_desc *desc,
     struct scatterlist *dst, struct scatterlist *src,
     unsigned int sz,
-    int enc)
+    int enc, struct completion *c)
 {
     int err=0;
     unsigned int rsz = roundup(sz, PAGE_SIZE);
@@ -188,7 +233,8 @@ crypto_gaes_ecb_crypt_zc(
 	return -ENOMEM;
     }
     
-    addr = kgpu_alloc_mmap_area((inplace?rsz:2*rsz)+sizeof(struct crypto_aes_ctx));
+    addr = kgpu_alloc_mmap_area(
+	(inplace?rsz:2*rsz)+sizeof(struct crypto_aes_ctx));
     if (!addr) {
 	free_page(TO_UL(data));
 	g_log(KGPU_LOG_ERROR, "GPU buffer space is null.\n");
@@ -228,16 +274,83 @@ crypto_gaes_ecb_crypt_zc(
 	    addr += PAGE_SIZE;
 	}
 
-    if (kgpu_call_sync(req)) {
-	err = -EFAULT;
-	g_log(KGPU_LOG_ERROR, "callgpu error\n");
+    if (c) {
+	struct gaes_ecb_async_data *adata =
+	    kmalloc(sizeof(struct gaes_ecb_async_data), GFP_KERNEL);
+	if (!adata) {
+	    g_log(KGPU_LOG_ERROR, "out of mem for async data\n");
+	    // TODO: do something here
+	} else {
+	    req->callback = async_gpu_callback;
+	    req->kdata = adata;
+
+	    adata->c = c;
+	    adata->dst = dst;
+	    adata->src = src;
+	    adata->desc = desc;
+	    adata->sz = sz;
+	    kgpu_call_async(req);
+	    return 0;
+	}
+    } else {
+	if (kgpu_call_sync(req)) {
+	    err = -EFAULT;
+	    g_log(KGPU_LOG_ERROR, "callgpu error\n");
+	}
+
+	kgpu_unmap_area(TO_UL(req->in));
+	kgpu_free_request(req);
+	free_page(TO_UL(data));
     }
 
-    kgpu_unmap_area(TO_UL(req->in));
-    kgpu_free_request(req);
-    free_page(TO_UL(data));
-    
     return err;
+}
+
+static int crypto_ecb_gpu_crypt(
+    struct blkcipher_desc *desc,
+    struct scatterlist *dst, struct scatterlist *src,
+    unsigned int nbytes, int enc)
+{
+    if ((nbyets>>PAGE_SHIFT)
+	>= (async_threshold+(async_threshold>>1))) {
+	unsigned int remainings = nbytes;
+	int nparts = nbytes/(async_threshold<<(PAGE_SHIFT-1));
+	struct completion *cs;
+	int i;
+
+	if (nparts & 0x1)
+	    nparts++;
+	nparts <<= 1;
+
+	cs = (struct completion*)kmalloc(sizeof(struct completion)*nparts,
+					 GFP_KERNEL);
+	if (cs) {
+	    for(i=0; i<nparts; i++) {
+		init_completion(cs+i);
+		if (zero_copy)
+		    crypto_gaes_ecb_crypt_zc(desc, dst, src,
+					     (i==nparts-1)?remainings:
+					     async_threshold<<PAGE_SHIFT,
+					     enc, cs+i);
+		else
+		    crypto_gaes_ecb_crypt_zc(desc, dst, src,
+					     (i==nparts-1)?remainings:
+					     async_threshold<<PAGE_SHIFT,
+					     enc, cs+i);
+		
+		remainings -= (async_threshold<<PAGE_SHIFT);
+	    }
+
+	    for (i=0; i<nparts; i++)
+		wait_for_completion_interruptible(cs+i);
+	    kfree(cs);
+	    return 0;
+	}
+    }
+    
+    return zero_copy?
+	crypto_gaes_ecb_crypt_zc(desc, dst, src, nbytes, enc, NULL):
+	crypto_gaes_ecb_crypt(desc, dst, src, nbytes, enc, NULL);
 }
 
 
@@ -311,9 +424,7 @@ crypto_gaes_ecb_encrypt(
 {    
     if (/*nbytes%PAGE_SIZE != 0 ||*/ nbytes <= GAES_ECB_SIZE_THRESHOLD)
     	return crypto_ecb_encrypt(desc, dst, src, nbytes);
-    return zero_copy?
-	crypto_gaes_ecb_crypt_zc(desc, dst, src, nbytes, 1):
-	crypto_gaes_ecb_crypt(desc, dst, src, nbytes, 1);
+    return crypto_ecb_gpu_crypt(desc, dst, src, nbytes, 1);
 }
 
 static int
@@ -324,9 +435,7 @@ crypto_gaes_ecb_decrypt(
 {
     if (/*nbytes%PAGE_SIZE != 0 ||*/ nbytes <= GAES_ECB_SIZE_THRESHOLD)
     	return crypto_ecb_decrypt(desc, dst, src, nbytes);
-    return zero_copy?
-	crypto_gaes_ecb_crypt_zc(desc, dst, src, nbytes, 1):
-	crypto_gaes_ecb_crypt(desc, dst, src, nbytes, 0);
+    return crypto_ecb_gpu_crypt(desc, dst, src, nbytes, 0);
 }
 
 static int crypto_gaes_ecb_init_tfm(struct crypto_tfm *tfm)
@@ -415,9 +524,14 @@ long test_gaes_ecb(size_t sz, int enc)
 }
 EXPORT_SYMBOL_GPL(test_gaes_ecb);
 
-
 static int __init crypto_gaes_ecb_module_init(void)
 {
+    if (!async_threshold) {
+	g_log(KGPU_LOG_ERROR,
+	      "incorrect async_threshold parameter %u\n",
+	      async_threshold);
+	async_threshold = 1;
+    }
     return crypto_register_template(&crypto_gaes_ecb_tmpl);
 }
 

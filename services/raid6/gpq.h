@@ -16,7 +16,7 @@ struct raid6_pq_data {
  * Not that efficient, but can save some time because
  * we can allocate disk pointers statically.
  */
-#define MAX_DISKS 32
+#define MAX_DISKS 50
 
 long test_gpq(int disks, size_t dsize);
 long test_cpq(int disks, size_t dsize);

@@ -141,6 +141,7 @@ static void gpu_gen_syndrome(
 	if (!adata) {
 	    gpq_log(KGPU_LOG_ERROR,
 		    "out of memory for gpq async data\n");
+	    // TODO: do something here
 	} else {	    
 	    req->callback = async_gpu_callback;
 	    req->kdata = adata;
@@ -164,7 +165,7 @@ static void gpu_gen_syndrome(
     }    
 }
 
-#define NSTREAMS 16
+#define NSTREAMS 8
 
 static void* __multi_gpu_gen_syndrome(
     int disks, size_t dsize, void **dps, struct completion cs[], int async)

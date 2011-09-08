@@ -343,7 +343,9 @@ unsigned long kgpu_alloc_mmap_area(unsigned long size)
 	p = kgpudev.vm.start + PAGE_SIZE*idx;
 	kgpudev.vm.alloc_sz[idx] = n;
     } else {
-	kgpu_log(KGPU_LOG_ERROR, "our of mmap area for mapping\n");
+	kgpu_log(KGPU_LOG_ERROR, "out of mmap area for mapping "
+		 "ask for %u page %lu size, idx %lu\n",
+		 n, size, idx);
     }
 
     spin_unlock(&kgpudev.vm_lock);
@@ -405,26 +407,23 @@ void kgpu_unmap_area(unsigned long addr)
 		     "allocated %u pages at index %u\n", n, idx);
 	    return;
 	}
+	//kgpu_log(KGPU_LOG_PRINT, "unmap %d pages from %p\n", n, addr);
 	if (n > 0) {
 	    int ret;
 	    spin_lock(&kgpudev.vm_lock);
 	    bitmap_clear(kgpudev.vm.bitmap, idx, n);
 	    kgpudev.vm.alloc_sz[idx] = 0;
-	    spin_unlock(&kgpudev.vm_lock);
 
+	    /*unmap_mapping_range(kgpudev.vm.vma->vm_file->f_mapping,
+	      addr, n<<PAGE_SHIFT, 1);*/
 
-	    /*
-	     * TODO: XXX: figure out how to remove the inserted pages
-	     */
-
-	    // This can work, but at high risk, a better way is to hold
-	    // the vma semaphore, but might be slower.
 	    kgpudev.vm.vma->vm_flags |= VM_PFNMAP;
 	    ret = zap_vma_ptes(kgpudev.vm.vma, addr, n<<PAGE_SHIFT);
 	    if (ret)
 		kgpu_log(KGPU_LOG_ALERT,
 			 "zap_vma_ptes returns %d\n", ret);
 	    kgpudev.vm.vma->vm_flags &= ~VM_PFNMAP;
+	    spin_unlock(&kgpudev.vm_lock);
 	}
     }
 }
@@ -438,8 +437,8 @@ int kgpu_map_page(struct page *p, unsigned long addr)
     ret = vm_insert_page(kgpudev.vm.vma, addr, p);
     if (unlikely(ret < 0)) {
 	kgpu_log(KGPU_LOG_ERROR,
-		 "can't remap pfn %lu, error %d\n",
-		 page_to_pfn(p), ret);
+		 "can't remap pfn %lu, error %d ct %d\n",
+		 page_to_pfn(p), ret, page_count(p));
     }
 
     up_write(&kgpudev.vm.vma->vm_mm->mmap_sem);
@@ -922,7 +921,9 @@ static void set_vm(struct vm_area_struct *vma)
 	if (kgpudev.vm.bitmap) kfree(kgpudev.vm.bitmap);
 	kgpudev.vm.alloc_sz = NULL;
 	kgpudev.vm.bitmap = NULL;
-    };	
+    };
+    bitmap_zero(kgpudev.vm.bitmap, kgpudev.vm.npages);
+    memset(kgpudev.vm.alloc_sz, 0, sizeof(u32)*kgpudev.vm.npages);
 }
 
 static void clean_vm(void)

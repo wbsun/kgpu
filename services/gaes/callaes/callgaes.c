@@ -28,10 +28,10 @@ char* AES_GPU = "gaes_ecb(aes)";
 
 char* CIPHER;
 
-#define MAX_BLK_SIZE (4*1024*1024)
+#define MAX_BLK_SIZE (32*1024*1024)
 #define MIN_BLK_SIZE (4*1024)
 
-#define TEST_TIMES 20
+#define TEST_TIMES 10
 
 #if 0
 
@@ -176,8 +176,8 @@ void test_aes(void)
 		dec = 1000000*(t1.tv_sec-t0.tv_sec) + 
 			((int)(t1.tv_usec) - (int)(t0.tv_usec));
 
-		printk("%25s: Size %10u, enc %10ld, BW: %6ldMB/s dec %10ld BW: %6ldMB/s\n",
-		       CIPHER, bs, enc, (bs*TEST_TIMES)/enc, dec, (bs*TEST_TIMES)/dec);
+		printk("%25s: Size %10u, enc BW: %6ldMB/s dec BW: %6ldMB/s\n",
+		       CIPHER, bs, (bs*TEST_TIMES)/enc, (bs*TEST_TIMES)/dec);
 	}
 	
 	
@@ -200,16 +200,16 @@ out:
 static int __init taes_init(void)
 {
 	printk("test gaes loaded\n");
-	/* CIPHER = AES_GPU_ASM; */
-	/* test_aes(); */
-	CIPHER = AES_GPU;
+	CIPHER = AES_GPU_ASM;
 	test_aes();
 	/* CIPHER = AES_GPU; */
 	/* test_aes(); */
-	/* CIPHER = AES_ASM; */
+	/* CIPHER = AES_GPU; */
 	/* test_aes(); */
-	CIPHER = AES;
+	CIPHER = AES_ASM;
 	test_aes();
+	/* CIPHER = AES; */
+	/* test_aes(); */
 	/* CIPHER = AES; */
 	/* test_aes(); */
 	return 0;

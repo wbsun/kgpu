@@ -35,10 +35,12 @@ struct crypto_gaes_ecb_ctx {
 };
 
 struct gaes_ecb_async_data {
-    struct completion *c;
-    struct scatterlist *dst, *src;
-    struct blkcipher_desc *desc;
-    unsigned long sz;
+    struct completion *c;             /* async-call completion */
+    struct scatterlist *dst, *src;    /* crypt destination and source */
+    struct blkcipher_desc *desc;      /* cipher descriptor */
+    unsigned int sz;                  /* data size */
+    void *expage;                     /* extra page allocated before calling KGPU, if any */
+    unsigned int offset;              /* offset within scatterlists */
 };
 
 static int zero_copy=0;
@@ -82,22 +84,29 @@ crypto_gaes_ecb_setkey(
 static void __done_cryption(struct blkcipher_desc *desc,
 			    struct scatterlist *dst,
 			    struct scatterlist *src,
-			    unsigned long sz,
-			    char *buf)
+			    unsigned int sz,
+			    char *buf, unsigned int offset)
 {
     struct blkcipher_walk walk;
-    unsigned long nbytes;
-
-    blkcipher_walk_init(&walk, dst, src, sz);
+    unsigned int nbytes, cur;
+    
+    blkcipher_walk_init(&walk, dst, src, sz+offset);
     blkcipher_walk_virt(desc, &walk);
+
+    cur = 0;
  	
     while ((nbytes = walk.nbytes)) {
-	u8 *wdst = walk.dst.virt.addr;
+	if (cur >= offset) {
+	    u8 *wdst = walk.dst.virt.addr;
 	
-	memcpy(wdst, buf, nbytes);
-	buf += nbytes;
-	
+	    memcpy(wdst, buf, nbytes);
+	    buf += nbytes;
+	}
+
+	cur += nbytes;
 	blkcipher_walk_done(desc, &walk, 0);
+	if (cur >= sz+offset)
+	    break;
     }
 }
 
@@ -108,15 +117,17 @@ static int async_gpu_callback(struct kgpu_request *req)
 
     if (!zero_copy)
 	__done_cryption(data->desc, data->dst, data->src, data->sz,
-			(char*)req->out);
+			(char*)req->out, data->offset);
 
     complete(data->c);
 
     if (zero_copy) {
 	kgpu_unmap_area(TO_UL(req->in));
-	free_page(TO_UL(req->udata));
     } else
 	kgpu_vfree(req->in);
+    
+    if (data->expage)
+	free_page(TO_UL(data->expage));
     kgpu_free_request(req);
 
     kfree(data);
@@ -128,11 +139,12 @@ crypto_gaes_ecb_crypt(
     struct blkcipher_desc *desc,
     struct scatterlist *dst, struct scatterlist *src,
     unsigned int sz,
-    int enc, struct completion *c)
+    int enc, struct completion *c, unsigned int offset)
 {
     int err=0;
     size_t rsz = roundup(sz, PAGE_SIZE);
     size_t nbytes;
+    unsigned int cur;
 
     struct kgpu_request *req;
     char *buf;
@@ -161,16 +173,22 @@ crypto_gaes_ecb_crypt(
     req->udatasize = sizeof(struct crypto_aes_ctx);
     req->udata = buf+rsz;
 
-    blkcipher_walk_init(&walk, dst, src, sz);
+    blkcipher_walk_init(&walk, dst, src, sz+offset);
     err = blkcipher_walk_virt(desc, &walk);
+    cur = 0;
 
     while ((nbytes = walk.nbytes)) {
-	u8 *wsrc = walk.src.virt.addr;
+	if (cur >= offset) {
+	    u8 *wsrc = walk.src.virt.addr;
+	    
+	    memcpy(buf, wsrc, nbytes);
+	    buf += nbytes;
+	}
 
-	memcpy(buf, wsrc, nbytes);
-	buf += nbytes;
-	
+	cur += nbytes;	
 	err = blkcipher_walk_done(desc, &walk, 0);
+	if (cur >= sz+offset)
+	    break;
     }
 
     memcpy(req->udata, &(ctx->aes_ctx), sizeof(struct crypto_aes_ctx));   
@@ -191,6 +209,8 @@ crypto_gaes_ecb_crypt(
 	    adata->src = src;
 	    adata->desc = desc;
 	    adata->sz = sz;
+	    adata->expage = NULL;
+	    adata->offset = offset;
 	    kgpu_call_async(req);
 	    return 0;
 	}
@@ -199,7 +219,7 @@ crypto_gaes_ecb_crypt(
 	    err = -EFAULT;
 	    g_log(KGPU_LOG_ERROR, "callgpu error\n");
 	} else {
-	    __done_cryption(desc, dst, src, sz, (char*)req->out);
+	    __done_cryption(desc, dst, src, sz, (char*)req->out, offset);
 	}
 	kgpu_vfree(req->in);
 	kgpu_free_request(req); 
@@ -213,11 +233,12 @@ crypto_gaes_ecb_crypt_zc(
     struct blkcipher_desc *desc,
     struct scatterlist *dst, struct scatterlist *src,
     unsigned int sz,
-    int enc, struct completion *c)
+    int enc, struct completion *c, unsigned int offset)
 {
     int err=0;
     unsigned int rsz = roundup(sz, PAGE_SIZE);
     int inplace = (sg_virt(dst) == sg_virt(src));
+    unsigned int pgoff;
 
     struct kgpu_request *req;
     unsigned long addr;
@@ -237,9 +258,13 @@ crypto_gaes_ecb_crypt_zc(
 	(inplace?rsz:2*rsz)+sizeof(struct crypto_aes_ctx));
     if (!addr) {
 	free_page(TO_UL(data));
-	g_log(KGPU_LOG_ERROR, "GPU buffer space is null.\n");
+	g_log(KGPU_LOG_ERROR, "GPU buffer space is null for"
+	      "size %u inplace %d\n", rsz, inplace);
 	return -ENOMEM;
-    }
+    } /*else {
+	g_log(KGPU_LOG_PRINT, "Got GPU buffer space %p for"
+	      "size %u inplace %d\n", addr, rsz, inplace);
+    } */
 
     req  = kgpu_alloc_request();
     if (!req) {
@@ -259,19 +284,27 @@ crypto_gaes_ecb_crypt_zc(
     memcpy(data, &(ctx->aes_ctx), sizeof(struct crypto_aes_ctx));   
     strcpy(req->service_name, enc?"gaes_ecb-enc":"gaes_ecb-dec");
 
-    n = rsz>>PAGE_SHIFT;
+    pgoff = offset >> PAGE_SHIFT;
+    n = pgoff + (rsz>>PAGE_SHIFT);
     for_each_sg(src, sg, n, i) {
-	kgpu_map_page(sg_page(sg), addr);
-	addr += PAGE_SIZE;
+	if (i >= pgoff) {	
+	    if ((err = kgpu_map_page(sg_page(sg), addr)) < 0)
+		goto get_out;
+	    addr += PAGE_SIZE;
+	}
     }
 
-    kgpu_map_page(virt_to_page(data), addr);
+    if ((err = kgpu_map_page(virt_to_page(data), addr)) < 0)
+	goto get_out;
     addr += PAGE_SIZE;
 
     if (!inplace)
 	for_each_sg(dst, sg, n, i) {
-	    kgpu_map_page(sg_page(sg), addr);
-	    addr += PAGE_SIZE;
+	    if (i >= pgoff) {
+		if ((err = kgpu_map_page(sg_page(sg), addr)) < 0)
+		    goto get_out;
+		addr += PAGE_SIZE;
+	    }
 	}
 
     if (c) {
@@ -289,6 +322,8 @@ crypto_gaes_ecb_crypt_zc(
 	    adata->src = src;
 	    adata->desc = desc;
 	    adata->sz = sz;
+	    adata->expage = data;
+	    adata->offset = offset;
 	    kgpu_call_async(req);
 	    return 0;
 	}
@@ -299,6 +334,7 @@ crypto_gaes_ecb_crypt_zc(
 	}
 
 	kgpu_unmap_area(TO_UL(req->in));
+    get_out:
 	kgpu_free_request(req);
 	free_page(TO_UL(data));
     }
@@ -317,6 +353,7 @@ static int crypto_ecb_gpu_crypt(
 	int nparts = nbytes/(async_threshold<<(PAGE_SHIFT-1));
 	struct completion *cs;
 	int i;
+	int ret = 0;
 
 	if (nparts & 0x1)
 	    nparts++;
@@ -328,15 +365,18 @@ static int crypto_ecb_gpu_crypt(
 	    for(i=0; i<nparts && remainings > 0; i++) {
 		init_completion(cs+i);
 		if (zero_copy)
-		    crypto_gaes_ecb_crypt_zc(desc, dst, src,
-					     (i==nparts-1)?remainings:
-					     async_threshold<<PAGE_SHIFT,
-					     enc, cs+i);
+		    ret = crypto_gaes_ecb_crypt_zc(desc, dst, src,
+						   (i==nparts-1)?remainings:
+						   async_threshold<<PAGE_SHIFT,
+						   enc, cs+i, i*(async_threshold<<PAGE_SHIFT));
 		else
-		    crypto_gaes_ecb_crypt(desc, dst, src,
-					     (i==nparts-1)?remainings:
-					     async_threshold<<PAGE_SHIFT,
-					     enc, cs+i);
+		    ret = crypto_gaes_ecb_crypt(desc, dst, src,
+						(i==nparts-1)?remainings:
+						async_threshold<<PAGE_SHIFT,
+						enc, cs+i, i*(async_threshold<<PAGE_SHIFT));
+
+		if (ret < 0)
+		    break;
 		
 		remainings -= (async_threshold<<PAGE_SHIFT);
 	    }
@@ -344,13 +384,13 @@ static int crypto_ecb_gpu_crypt(
 	    for (i--; i>=0; i--)
 		wait_for_completion_interruptible(cs+i);
 	    kfree(cs);
-	    return 0;
+	    return ret;
 	}
     }
     
     return zero_copy?
-	crypto_gaes_ecb_crypt_zc(desc, dst, src, nbytes, enc, NULL):
-	crypto_gaes_ecb_crypt(desc, dst, src, nbytes, enc, NULL);
+	crypto_gaes_ecb_crypt_zc(desc, dst, src, nbytes, enc, NULL, 0):
+	crypto_gaes_ecb_crypt(desc, dst, src, nbytes, enc, NULL, 0);
 }
 
 

@@ -11,6 +11,7 @@
 #include "../../../kgpu/kgpu.h"
 #include "../../../kgpu/gputils.h"
 #include "../gpq.h"
+#include "../r62_recov.h"
 
 #define SECTOR_SIZE 512
 #define BYTES_PER_THREAD 8
@@ -18,11 +19,59 @@
 #define THREADS_PER_BLOCK (BYTES_PER_BLOCK/BYTES_PER_THREAD)
 
 struct kgpu_service raid6_pq_srv;
+struct kgpu_service r62_recov_srv;
 
 /*
  * Include device code
  */
 #include "dev.cu"
+
+int r62_recov_compute_size(struct kgpu_service_request *sr)
+{
+    struct r62_recov_data *data = (struct r62_recov_data*)sr->hdata;
+    
+    sr->block_x = SECTOR_SIZE;
+    sr->block_y = 1;
+    sr->grid_x  = data->bytes/SECTOR_SIZE;
+    sr->grid_y  = 1;
+
+    return 0;
+}
+
+int r62_recov_prepare(struct kgpu_service_request *sr)
+{
+    cudaStream_t s = (cudaStream_t)(sr->stream);
+  
+    csc( ah2dcpy( sr->din, sr->hin, sr->insize, s) );
+
+    return 0;
+}
+
+int r62_recov_launch(struct kgpu_service_request *sr)
+{
+    struct r62_recov_data *data = (struct r62_recov_data*)sr->hdata;
+    cudaStream_t s = (cudaStream_t)(sr->stream);
+
+    raid6_recov_2data<<<dim3(sr->grid_x, sr->grid_y),
+	dim3(sr->block_x, sr->block_y), 0, s>>>(
+	    (u8*)(sr->din),
+	    ((u8*)(sr->din))+data->bytes,
+	    (u8*)(sr->dout),
+	    ((u8*)(sr->dout))+data->bytes,
+	    data->pbidx, data->qidx);
+      
+    return 0;
+}
+
+int r62_recov_post(struct kgpu_service_request *sr)
+{
+    cudaStream_t s = (cudaStream_t)(sr->stream);
+
+    csc( ad2hcpy( sr->hout, sr->dout, sr->outsize, s ) );
+
+    return 0;
+}
+
 
 int raid6_pq_compute_size(struct kgpu_service_request *sr)
 {
@@ -41,7 +90,6 @@ int raid6_pq_prepare(struct kgpu_service_request *sr)
     struct raid6_pq_data* data = (struct raid6_pq_data*)(sr->hdata);
     cudaStream_t s = (cudaStream_t)(sr->stream);
   
-    // csc( ah2dcpy( sr->din, sr->hin, 1024, s) );
     csc( ah2dcpy( sr->din, sr->hin, data->dsize*(data->nr_d-2), s) );
 
     return 0;
@@ -52,19 +100,19 @@ int raid6_pq_launch(struct kgpu_service_request *sr)
     struct raid6_pq_data* data = (struct raid6_pq_data*)(sr->hdata);
     cudaStream_t s = (cudaStream_t)(sr->stream);
 
-    raid6_pq<<<dim3(sr->grid_x, sr->grid_y), dim3(sr->block_x, sr->block_y), 0,
-      s>>>((unsigned int)data->nr_d, (unsigned long)data->dsize, (u8*)sr->din);
+    raid6_pq<<<dim3(sr->grid_x, sr->grid_y),
+	dim3(sr->block_x, sr->block_y), 0,
+      s>>>(
+	  (unsigned int)data->nr_d,
+	  (unsigned long)data->dsize, (u8*)sr->din);
       
     return 0;
 }
 
 int raid6_pq_post(struct kgpu_service_request *sr)
 {
-    // struct raid6_pq_data* data = (struct raid6_pq_data*)sr->data;
     cudaStream_t s = (cudaStream_t)(sr->stream);
 
-    /* outsize should be 2*data->dsize */
-    // csc( ad2hcpy( sr->hout, sr->dout, 1024, s ) );
     csc( ad2hcpy( sr->hout, sr->dout, sr->outsize, s ) );
 
     return 0;
@@ -73,7 +121,7 @@ int raid6_pq_post(struct kgpu_service_request *sr)
 extern "C" int init_service(void *lh, int (*reg_srv)(struct kgpu_service*, void*))
 {
     int err;
-    printf("[libsrv_raid6_pa] Info: init raid6_pq service\n");
+    printf("[libsrv_raid6] Info: init raid6 services\n");
 
     csc( cudaFuncSetCacheConfig(raid6_pq, cudaFuncCachePreferL1) );
     csc( cudaFuncSetCacheConfig(raid6_recov_2data, cudaFuncCachePreferL1) );
@@ -87,22 +135,42 @@ extern "C" int init_service(void *lh, int (*reg_srv)(struct kgpu_service*, void*
 
     err = reg_srv(&raid6_pq_srv, lh);
     if (err) {
-	fprintf(stderr, "[libsrv_raid6_pq] Error: failed"
+	fprintf(stderr, "[libsrv_raid6] Error: failed"
 	    " to register raid6_pq service\n");
+	return err;
+    }
+
+    sprintf(r62_recov_srv.name, "r62_recov");
+    r62_recov_srv.sid = 0;
+    r62_recov_srv.compute_size = r62_recov_compute_size;
+    r62_recov_srv.launch = r62_recov_launch;
+    r62_recov_srv.prepare = r62_recov_prepare;
+    r62_recov_srv.post = r62_recov_post;
+
+    err = reg_srv(&r62_recov_srv, lh);
+    if (err) {
+	fprintf(stderr, "[libsrv_raid6] Error: failed"
+	    " to register r62_recov service\n");
     }
     return err;
 }
 
 extern "C" int finit_service(void *lh, int (*unreg_srv)(const char *))
 {
-    int err;
-    printf("[libsrv_raid6_pa] Info: finit raid6_pq service\n");
+    int err1, err2;
+    printf("[libsrv_raid6] Info: finit raid6 services\n");
     
-    err = unreg_srv(raid6_pq_srv.name);
-    if (err) {
-	fprintf(stderr, "[libsrv_raid6_pq] Error: failed"
+    err1 = unreg_srv(raid6_pq_srv.name);
+    if (err1) {
+	fprintf(stderr, "[libsrv_raid6] Error: failed"
 	    " to unregister raid6_pq service\n");
     }
-    return err;
+
+    err2 = unreg_srv(r62_recov_srv.name);
+    if (err2) {
+	fprintf(stderr, "[libsrv_raid6] Error: failed"
+	    " to unregister r62_recov service\n");
+    }
+    return err1|err2;
 }
 

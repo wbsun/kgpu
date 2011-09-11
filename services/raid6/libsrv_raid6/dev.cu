@@ -15,7 +15,7 @@
 typedef unsigned long u64;
 typedef unsigned char u8;
 
-//#include "table.h"
+#include "table.h"
 
 #define NBYTES(x) ((x) * 0x0101010101010101UL)
 #define NSIZE  8
@@ -25,9 +25,9 @@ typedef unsigned char u8;
 //(((v)<<1)&NBYTES(0xfe))
 #define MASK(v) ({ u64 vv = (v)&(0x8080808080808080); (vv<<1)-(vv>>7); })
 
-__global__ void raid6_recov_2data(
+__global__ void raid6_recov_2data_nc(
     u8 *p, u8 *q, u8 *dp, u8 *dq,
-    const u8 *pbmul, const u8 *qmul, size_t bytes)
+    const u8 *pbmul, const u8 *qmul)
 {
     int tid = threadIdx.x+blockDim.x*blockIdx.x;
     u8 px = p[tid]^dp[tid];
@@ -35,6 +35,20 @@ __global__ void raid6_recov_2data(
     dq[tid] = pbmul[px]^qx;
     dp[tid] = dq[tid]^px;
 }
+
+__global__ void raid6_recov_2data(u8 *p, u8 *q, u8 *dp, u8 *dq,
+				  int pbidx, int qidx)
+{
+    int tid = threadIdx.x+blockDim.x*blockIdx.x;
+    const u8 *pbmul = draid6_gfmul[pbidx];
+    const u8 *qmul = draid6_gfmul[qidx];
+    
+    u8 px = p[tid] ^ dp[tid];
+    u8 qx = qmul[q[tid] ^ dq[tid]];
+    dq[tid] = pbmul[px] ^ qx;
+    dp[tid] = dq[tid] ^ px;
+}
+
 
 
 /*

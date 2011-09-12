@@ -37,11 +37,11 @@ __global__ void raid6_recov_2data_nc(
 }
 
 __global__ void raid6_recov_2data(u8 *p, u8 *q, u8 *dp, u8 *dq,
-				  int pbidx, int qidx)
+				  struct r62_recov_data* data)
 {
-    int tid = threadIdx.x+blockDim.x*blockIdx.x;
-    const u8 *pbmul = draid6_gfmul[pbidx];
-    const u8 *qmul = draid6_gfmul[qidx];
+    int tid = threadIdx.x+blockDim.x*(blockIdx.x*gridDim.y+blockIdx.y);
+    const u8 *pbmul = draid6_gfmul[data->idx[blockIdx.x].pbidx];
+    const u8 *qmul = draid6_gfmul[data->idx[blockIdx.x].qidx];
     
     u8 px = p[tid] ^ dp[tid];
     u8 qx = qmul[q[tid] ^ dq[tid]];

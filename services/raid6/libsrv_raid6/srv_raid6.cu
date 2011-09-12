@@ -14,6 +14,9 @@
 #include "../r62_recov.h"
 
 #define SECTOR_SIZE 512
+#ifndef PAGE_SIZE
+#define PAGE_SIZE 4096
+#endif
 #define BYTES_PER_THREAD 8
 #define BYTES_PER_BLOCK (SECTOR_SIZE*8)
 #define THREADS_PER_BLOCK (BYTES_PER_BLOCK/BYTES_PER_THREAD)
@@ -32,8 +35,8 @@ int r62_recov_compute_size(struct kgpu_service_request *sr)
     
     sr->block_x = SECTOR_SIZE;
     sr->block_y = 1;
-    sr->grid_x  = data->bytes/SECTOR_SIZE;
-    sr->grid_y  = 1;
+    sr->grid_x  = data->n;
+    sr->grid_y  = PAGE_SIZE/SECTOR_SIZE;
 
     return 0;
 }
@@ -50,6 +53,7 @@ int r62_recov_prepare(struct kgpu_service_request *sr)
 int r62_recov_launch(struct kgpu_service_request *sr)
 {
     struct r62_recov_data *data = (struct r62_recov_data*)sr->hdata;
+    struct r62_recov_data *dd = (struct r62_recov_data*)sr->ddata;
     cudaStream_t s = (cudaStream_t)(sr->stream);
 
     raid6_recov_2data<<<dim3(sr->grid_x, sr->grid_y),
@@ -58,15 +62,15 @@ int r62_recov_launch(struct kgpu_service_request *sr)
 	    ((u8*)(sr->din))+data->bytes,
 	    (u8*)(sr->dout),
 	    ((u8*)(sr->dout))+data->bytes,
-	    data->pbidx, data->qidx);
-      
+	    dd);
+    
     return 0;
 }
 
 int r62_recov_post(struct kgpu_service_request *sr)
 {
     cudaStream_t s = (cudaStream_t)(sr->stream);
-
+    
     csc( ad2hcpy( sr->hout, sr->dout, sr->outsize, s ) );
 
     return 0;
@@ -141,7 +145,7 @@ extern "C" int init_service(void *lh, int (*reg_srv)(struct kgpu_service*, void*
     }
 
     sprintf(r62_recov_srv.name, "r62_recov");
-    r62_recov_srv.sid = 0;
+    r62_recov_srv.sid = 1;
     r62_recov_srv.compute_size = r62_recov_compute_size;
     r62_recov_srv.launch = r62_recov_launch;
     r62_recov_srv.prepare = r62_recov_prepare;

@@ -337,7 +337,7 @@ __2data_recov_n(int disks, size_t bytes, int faila, int failb,
 #define R62_REQUEST_DONE   2
 #define R62_REQUEST_ERROR  3
 
-#define R62_WAIT_TIMEOUT (HZ/100)
+#define R62_WAIT_TIMEOUT (1)
 
 struct r62_request {
     int disks;
@@ -358,10 +358,13 @@ struct r62_data {
 static struct kmem_cache *r62_request_cache;
 static struct r62_data r62dat;
 
-static int g_r62_max_reqs = 16;
+static int r62_max_reqs = 16;
+module_param(r62_max_reqs, int, 16);
+MODULE_PARM_DESC(r62_max_reqs, "max request queue size");
 
-module_param(g_r62_max_reqs, int, 16);
-MODULE_PARM_DESC(g_r62_max_reqs, "max request queue size");
+static int use_cpu = 1;
+module_param(use_cpu, int, 1);
+MODULE_PARM_DESC(use_cpu, "use cpu 2data recovery");
 
 static void r62_request_ctr(void *data)
 {
@@ -396,11 +399,10 @@ static void finit_gpu_system(void)
 
 static void process_r62_requests(struct list_head *reqs, int n, size_t tsz)
 {
-    struct page *pp, *pq, *pdp, *pdq;
     u8 *p, *q, *dp, *dq;
     struct list_head *pos;
     struct r62_request *r = NULL;
-    int i, j, pbidx, qidx;
+    int i, j;
 
     void **ptrs = NULL;
 
@@ -409,8 +411,10 @@ static void process_r62_requests(struct list_head *reqs, int n, size_t tsz)
     struct r62_recov_data *data = NULL;
 
     size_t rsz = n<<(PAGE_SHIFT+1);
+    size_t dsz = sizeof(struct r62_recov_data)+n*sizeof(struct r62_tbl);
 
-    gbuf = (u8*)kgpu_vmalloc(2*rsz+PAGE_SIZE);
+    gbuf = (u8*)kgpu_vmalloc(2*rsz+round_up(dsz, PAGE_SIZE));
+			     
     if (!gbuf) {
 	printk("[async_raid6_recov] Error: out of GPU mem\n");
 	goto fail_out;
@@ -423,22 +427,24 @@ static void process_r62_requests(struct list_head *reqs, int n, size_t tsz)
     }
 
     greq->in        = gbuf;
-    greq->out       = gbuf + rsz + PAGE_SIZE;
-    greq->insize    = rsz;
+    greq->out       = gbuf + rsz + round_up(dsz, PAGE_SIZE);
+    greq->insize    = 2*rsz+round_up(dsz, PAGE_SIZE);
     greq->outsize   = rsz;
     greq->udata     = gbuf + rsz;
-    greq->udatasize = sizeof(int)*2;
+    greq->udatasize = dsz;
 
     data = (struct r62_recov_data*)greq->udata;
-    data->bytes = (size_t)(n<<PAGE_SHIFT);
-
-    p  = gbuf;
-    q  = p + (n<<PAGE_SHIFT);
-    dp = q + (n<<PAGE_SHIFT);
-    dq = dp + (n<<PAGE_SHIFT);
+    data->bytes = (size_t)(n*PAGE_SIZE);
+    data->n = n;
+    
+    p  = (u8*)greq->in;
+    q  = p + (n*PAGE_SIZE);
+    dp = (u8*)greq->out;
+    dq = dp + (n*PAGE_SIZE);
 
     j = 0;
     list_for_each(pos, reqs) {
+	u8 *tp, *tq, *tdp, *tdq;
 	r = list_entry(pos, struct r62_request, list);
 
 	if (!ptrs) {
@@ -449,47 +455,50 @@ static void process_r62_requests(struct list_head *reqs, int n, size_t tsz)
 	    }
 	}
 
-	pp = r->blocks[r->disks-2];
-	pq = r->blocks[r->disks-1];
+	for (i=0; i<r->disks; i++) {
+	    ptrs[i] = page_address(r->blocks[i]);	    
+	}
 
-	pdp = r->blocks[r->faila];
-	r->blocks[r->faila] = virt_to_page((void *)raid6_empty_zero_page);
-	r->blocks[r->disks-2] = pdp;
-	pdq = r->blocks[r->failb];
-	r->blocks[r->failb] = r->blocks[r->faila];
-        r->blocks[r->disks-1] = pdq;
+	tp = (u8*)ptrs[r->disks-2];
+	tq = (u8*)ptrs[r->disks-1];
 
-	for (i=0; i<r->disks; i++)
-	    ptrs = page_address(r->blocks[i]);
+        tdp = (u8 *)ptrs[r->faila];
+	ptrs[r->faila] = (void *)raid6_empty_zero_page;
+	ptrs[r->disks-2] = tdp;
+	tdq = (u8 *)ptrs[r->failb];
+	ptrs[r->failb] = (void *)raid6_empty_zero_page;
+	ptrs[r->disks-1] = tdq;
 
 	raid6_call.gen_syndrome(r->disks, r->bytes, ptrs);
 
-	r->blocks[r->faila] = pdp;
-	r->blocks[r->failb] = pdq;
-	r->blocks[r->disks-2] = pp;
-	r->blocks[r->disks-1] = pq;
+	ptrs[r->faila]   = tdp;
+	ptrs[r->failb]   = tdq;
+	ptrs[r->disks-2] = tp;
+	ptrs[r->disks-1] = tq;
+
+	data->idx[j].pbidx = raid6_gfexi[r->failb - r->faila];
+	data->idx[j].qidx  = raid6_gfinv[raid6_gfexp[r->faila]^raid6_gfexp[r->failb]];
 
 	memcpy(p+(j<<PAGE_SHIFT),
-	       page_address(r->blocks[r->disks-2]), PAGE_SIZE);
+	       tp,//page_address(r->blocks[r->disks-2]),
+	       PAGE_SIZE);
 	memcpy(q+(j<<PAGE_SHIFT),
-	       page_address(r->blocks[r->disks-1]), PAGE_SIZE);
+	       tq,//page_address(r->blocks[r->disks-1]),
+	       PAGE_SIZE);
 	memcpy(dp+(j<<PAGE_SHIFT),
-	       page_address(r->blocks[r->faila]), PAGE_SIZE);
+	       tdp,//page_address(r->blocks[r->faila]),
+	       PAGE_SIZE);
 	memcpy(dq+(j<<PAGE_SHIFT),
-	       page_address(r->blocks[r->failb]), PAGE_SIZE);
+	       tdq,//page_address(r->blocks[r->failb]),
+	       PAGE_SIZE);
+	
 	j++;
     }
 
     if (ptrs) kfree(ptrs);
-
-    pbidx = raid6_gfexi[r->failb-r->faila];
-    qidx  = raid6_gfinv[raid6_gfexp[r->faila]^raid6_gfexp[r->failb]];
-
-    data->pbidx = pbidx;
-    data->qidx = qidx;
     
     strcpy(greq->service_name, "r62_recov");
-
+    
     if (kgpu_call_sync(greq)) {
 	printk("[async_raid6_recov] Error: call gpu failed\n");
 	goto fail_out;
@@ -497,14 +506,15 @@ static void process_r62_requests(struct list_head *reqs, int n, size_t tsz)
 	j = 0;
 	list_for_each(pos, reqs) {
 	    r = list_entry(pos, struct r62_request, list);
-
+	    
 	    memcpy(page_address(r->blocks[r->faila]),
 		   dp+(j<<PAGE_SHIFT), PAGE_SIZE);
 	    memcpy(page_address(r->blocks[r->failb]),
 		   dq+(j<<PAGE_SHIFT), PAGE_SIZE);
-	    j++;
+	    
 	    r->status = R62_REQUEST_DONE;
 	    complete(&r->c);
+	    j++;
 	}
 	goto free_out;
     }
@@ -522,10 +532,6 @@ free_out:
 }
 
 
-/*
- * BIG ASSUMPTION: for all requests, faila == failb!
- * So use la or ra.
- */
 static void gpu_async_raid6_2drecov(int disks, size_t bytes,
 					int faila, int failb,
 					struct page **blocks)
@@ -545,25 +551,28 @@ static void gpu_async_raid6_2drecov(int disks, size_t bytes,
     r->faila = faila;
     r->failb = failb;
     r->blocks = blocks;
-    
+    init_completion(&r->c);
+    r->status = R62_REQUEST_WAIT;
+
     spin_lock(&r62dat.reqlock);
     list_add_tail(&r->list, &r62dat.reqs);
     r62dat.nr++;
-    if (r62dat.nr >= g_r62_max_reqs) {
+    if (r62dat.nr >= r62_max_reqs) {
 	goto do_process; // Yeah! I like GOTO!
     }
-    spin_unlock(&r62dat.reqlock);
+    spin_unlock(&r62dat.reqlock);    
 
 retry:
     if (wait_for_completion_interruptible_timeout(
 	    &r->c, R62_WAIT_TIMEOUT))
-    { // timeout	
+    { // timeout
 	spin_lock(&r62dat.reqlock);
 	if (r->status == R62_REQUEST_WAIT) {
 	do_process:
 	    n = 0;
 	    tsz = 0;
-	    reqs = r62dat.reqs;
+	    reqs.next = r62dat.reqs.next;
+	    reqs.prev = r62dat.reqs.prev;
 	    reqs.next->prev = &reqs;
 	    reqs.prev->next = &reqs;
 	    INIT_LIST_HEAD(&r62dat.reqs);
@@ -578,16 +587,16 @@ retry:
 	    r62dat.nr = 0;
 
 	    spin_unlock(&r62dat.reqlock);
-	    
+
 	    process_r62_requests(&reqs, n, tsz);
 	} else {
 	    spin_unlock(&r62dat.reqlock);
 	    goto retry;
 	}
 	    
-    } else if (!completion_done(&r->c)) {
+    } /*else if (!completion_done(&r->c)) {
 	goto retry;
-    }
+    }*/
 
     kmem_cache_free(r62_request_cache, r);
 }
@@ -627,8 +636,6 @@ async_raid6_2data_recov(int disks, size_t bytes, int faila, int failb,
 	if (failb < faila)
 		swap(faila, failb);
 
-	pr_debug("%s: disks: %d len: %zu\n", __func__, disks, bytes);
-
 	/* if a dma resource is not available or a scribble buffer is not
 	 * available punt to the synchronous path.  In the 'dma not
 	 * available' case be sure to use the scribble buffer to
@@ -637,31 +644,37 @@ async_raid6_2data_recov(int disks, size_t bytes, int faila, int failb,
 	if (!async_dma_find_channel(DMA_PQ) || !scribble) {
 
 	    async_tx_quiesce(&submit->depend_tx);
+
+	    if (!use_cpu) {
+		struct page **ptrs = scribble ?
+		    (struct page **)scribble : (struct page **) blocks;
+			    
+		for (i = 0; i < disks; i++)
+		    if (blocks[i] == NULL)
+			ptrs[i] = virt_to_page((void *) raid6_empty_zero_page);
+		    else
+			ptrs[i] = blocks[i];
 	    
-	    gpu_async_raid6_2drecov(disks,
-				    bytes,
-				    faila,
-				    failb,
-				    blocks);
-
+		gpu_async_raid6_2drecov(disks,
+					bytes,
+					faila,
+					failb,
+					ptrs);
+	    } else {	    
+		void **ptrs = scribble ? scribble : (void **) blocks;
+	    
+		for (i = 0; i < disks; i++)
+		    if (blocks[i] == NULL)
+			ptrs[i] = (void *) raid6_empty_zero_page;
+		    else
+			ptrs[i] = page_address(blocks[i]);
+		
+		raid6_2data_recov(disks, bytes, faila, failb, ptrs);
+	    }
+	    
 	    async_tx_sync_epilog(submit);
-
+	    
 	    return NULL;
-	    		
-	    /* void **ptrs = scribble ? scribble : (void **) blocks;
-	    
-	    async_tx_quiesce(&submit->depend_tx);
-	    for (i = 0; i < disks; i++)
-		if (blocks[i] == NULL)
-		    ptrs[i] = (void *) raid6_empty_zero_page;
-		else
-		    ptrs[i] = page_address(blocks[i]);
-	    
-	    raid6_2data_recov(disks, bytes, faila, failb, ptrs);
-	    
-	    async_tx_sync_epilog(submit);
-	    
-	    return NULL; */
 	}
 
 	non_zero_srcs = 0;
@@ -715,8 +728,6 @@ async_raid6_datap_recov(int disks, size_t bytes, int faila,
 	void *scribble = submit->scribble;
 	int good_srcs, good, i;
 	struct page *srcs[2];
-
-	pr_debug("%s: disks: %d len: %zu\n", __func__, disks, bytes);
 
 	/* if a dma resource is not available or a scribble buffer is not
 	 * available punt to the synchronous path.  In the 'dma not

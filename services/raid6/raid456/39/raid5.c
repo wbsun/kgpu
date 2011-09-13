@@ -970,7 +970,7 @@ ops_run_compute6_2(struct stripe_head *sh, struct raid5_percpu *percpu)
 			
 			desc = async_raid6_2data_recov(syndrome_disks+2,
 						       STRIPE_SIZE, faila, failb,
-						       blocks, &submit);
+						       pgs, &submit);
 			kfree(pgs);
 			return desc;
 		}

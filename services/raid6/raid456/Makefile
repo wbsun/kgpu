@@ -1,12 +1,16 @@
 #
 # Makefile for the kernel software RAID 456
 #
-raid456-y += raid5.o
-obj-m += raid456.o
-
 all:
-	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) modules
-	$(if $(BUILD_DIR), cp raid456.ko $(BUILD_DIR)/ )
+ifeq ($(kv), 38)
+	$(MAKE) -C 38 all BUILD_DIR=$(BUILD_DIR)
+else
+	$(MAKE) -C 39 all BUILD_DIR=$(BUILD_DIR)
+endif
 
 clean:
-	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) clean
+ifeq ($(kv), 38)
+	$(MAKE) -C 38 clean BUILD_DIR=$(BUILD_DIR)
+else
+	$(MAKE) -C 39 clean BUILD_DIR=$(BUILD_DIR)
+endif

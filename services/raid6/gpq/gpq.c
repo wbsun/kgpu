@@ -30,10 +30,10 @@ struct gpq_async_data {
 static int replace_global = 0;
 static int use_hybrid = 0;
 
-module_param(replace_global, int, 0);
+module_param(replace_global, int, 0444);
 MODULE_PARM_DESC(replace_global, "replace global pq algorithm with gpq");
 
-module_param(use_hybrid, int, 0);
+module_param(use_hybrid, int, 0444);
 MODULE_PARM_DESC(use_hybrid,
 		 "use hybrid pq computing, which uses both CPU and GPU");
 

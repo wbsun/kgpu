@@ -45,13 +45,13 @@ struct gaes_ecb_async_data {
 
 static int zero_copy=0;
 
-module_param(zero_copy, int, 0);
-MODULE_PARM_DESC(zero_copy, "use GPU mem zero-copy");
+module_param(zero_copy, int, 0444);
+MODULE_PARM_DESC(zero_copy, "use GPU mem zero-copy, default 0 (No)");
 
 static int async_threshold=256;
 
-module_param(async_threshold, int, 256);
-MODULE_PARM_DESC(async_threshold, "size(#pages) threshold for async call");
+module_param(async_threshold, int, 0444);
+MODULE_PARM_DESC(async_threshold, "size(#pages) threshold for async call, default 256");
 
 static int
 crypto_gaes_ecb_setkey(

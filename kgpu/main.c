@@ -123,8 +123,6 @@ int kgpu_call_async(struct kgpu_request *req)
     
     spin_unlock(&(kgpudev.reqlock));
 
-    dbg("call gpu %d\n", req->id);
-    
     return 0;
 }
 EXPORT_SYMBOL_GPL(kgpu_call_async);
@@ -187,10 +185,8 @@ int kgpu_call_sync(struct kgpu_request *req)
     
     spin_unlock(&(kgpudev.reqlock));
 
-    dbg("call gpu sync before %d\n", req->id);
     wait_event_interruptible(data->queue, (data->done==1));
-    dbg("call gpu sync done %d\n", req->id);
-    
+        
     req->kdata = data->oldkdata;
     req->callback = data->oldcallback;
     kmem_cache_free(kgpu_sync_call_data_cache, data);
@@ -213,7 +209,6 @@ int kgpu_next_request_id(void)
     
     spin_unlock(&(kgpudev.ridlock));
 
-    dbg("called next req id %d\n", rt);
     return rt;
 }
 EXPORT_SYMBOL_GPL(kgpu_next_request_id);
@@ -253,7 +248,6 @@ struct kgpu_request* kgpu_alloc_request(void)
 {
     struct kgpu_request *req =
 	kmem_cache_alloc(kgpu_request_cache, GFP_KERNEL);
-    dbg("new request allocated %d\n", req->id);
     return req;
 }
 EXPORT_SYMBOL_GPL(kgpu_alloc_request);
@@ -261,7 +255,6 @@ EXPORT_SYMBOL_GPL(kgpu_alloc_request);
 
 void kgpu_free_request(struct kgpu_request* req)
 {
-    dbg("request freeed %d\n", req->id);
     kmem_cache_free(kgpu_request_cache, req);
 }
 EXPORT_SYMBOL_GPL(kgpu_free_request);
@@ -460,9 +453,6 @@ static void* map_page_units(void *units, int n, int is_page)
     down_write(&kgpudev.vm.vma->vm_mm->mmap_sem);
 
     for (i=0; i<n; i++) {
-	dbg("remap pfn 0x%lX\n",
-	    is_page? page_to_pfn(((struct page**)units)[i]) : ((unsigned long*)units)[i]);
-	
 	ret = vm_insert_page(
 	    kgpudev.vm.vma,
 	    addr+i*PAGE_SIZE,
@@ -592,8 +582,6 @@ ssize_t kgpu_read(
 	if (filp->f_flags & O_NONBLOCK)
 	    return -EAGAIN;
 
-	dbg("blocking read %s\n", current->comm);
-
 	if (wait_event_interruptible(
 		kgpudev.reqq, (!list_empty(&(kgpudev.reqs)))))
 	    return -ERESTARTSYS;
@@ -609,9 +597,6 @@ ssize_t kgpu_read(
 	
 	memcpy(buf, &kureq, sizeof(struct kgpu_ku_request));
 	ret = c;
-
-	dbg("one request read %s %d %ld\n",
-	    item->r->service_name, item->r->id, ret);
     }
 
     spin_unlock(&(kgpudev.reqlock));
@@ -625,9 +610,6 @@ ssize_t kgpu_read(
 	spin_unlock(&(kgpudev.rtdreqlock));
     }
     
-    dbg("%s read %lu return %ld\n",
-	current->comm, c, ret);
-
     *fpos += ret;
 
     return ret;    
@@ -649,12 +631,9 @@ ssize_t kgpu_write(struct file *filp, const char __user *buf,
 
 	memcpy/*copy_from_user*/(&kuresp, buf, realcount);
 
-	dbg("response ID: %d\n", kuresp.id);
-
 	item = find_request(kuresp.id, 1);
 	if (!item)
 	{	    
-	    dbg("no request found for %d\n", kuresp.id);
 	    ret = -EFAULT; /* no request found */
 	} else {
 	    item->r->errcode = kuresp.errcode;
@@ -699,9 +678,6 @@ ssize_t kgpu_write(struct file *filp, const char __user *buf,
 	    kmem_cache_free(kgpu_request_item_cache, item);
 	}
     }
-
-    dbg("%s write %lu return %ld\n",
-	current->comm, count, ret);
 
     return ret;
 }

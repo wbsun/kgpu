@@ -27,9 +27,5 @@
 
 /* memory ops */
 extern struct page *kgpu_v2page(unsigned long vaddr);
-extern int
-kgpu_check_phy_consecutiveness(unsigned long vaddr, size_t sz, size_t framesz);
-extern void kgpu_dump_pages(unsigned long vaddr, unsigned long sz);
-extern void kgpu_test_memory_pages(unsigned long vaddr, unsigned long sz);
 
 #endif

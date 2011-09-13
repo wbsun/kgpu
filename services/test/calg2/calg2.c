@@ -66,7 +66,7 @@ static int __init minit(void)
     if (!ga) {
 	g_log(KGPU_LOG_ERROR, "mmap error\n");
 	kgpu_free_request(req);
-	free_page(buf);
+	free_page(TO_UL(buf));
 	return 0;
     }
 

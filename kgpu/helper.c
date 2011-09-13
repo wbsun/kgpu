@@ -163,8 +163,6 @@ static void kh_free_service_request(struct _kgpu_sritem *s)
 static void kh_init_service_request(struct _kgpu_sritem *item,
 			       struct kgpu_ku_request *kureq)
 {
-    dbg("get request %d %s\n", kureq->id, kureq->service_name);
-    
     list_add_tail(&item->glist, &all_reqs);
 
     memset(&item->sr, 0, sizeof(struct kgpu_service_request));
@@ -185,11 +183,6 @@ static void kh_init_service_request(struct _kgpu_sritem *item,
 	item->sr.state = KGPU_REQ_INIT;
 	item->sr.errcode = 0;
 	list_add_tail(&item->list, &init_reqs);
-	dbg("size computed\n");
-
-	dbg("new request: in: 0x%lX, out: 0x%lX, data: 0x%lX\n",
-	       kureq->in, kureq->out, kureq->data);
-	
     }
 }
 
@@ -264,7 +257,6 @@ static int kh_prepare_exec(struct _kgpu_sritem *sreq)
 	    dbg("%d fails prepare\n", sreq->sr.id);
 	    kh_fail_request(sreq, r);
 	} else {
-	    dbg("%d done prepare\n", sreq->sr.id);
 	    sreq->sr.state = KGPU_REQ_PREPARED;
 	    list_del(&sreq->list);
 	    list_add_tail(&sreq->list, &prepared_reqs);
@@ -281,7 +273,6 @@ static int kh_launch_exec(struct _kgpu_sritem *sreq)
 	dbg("%d fails launch\n", sreq->sr.id);
 	kh_fail_request(sreq, r);	
     } else {
-	dbg("%d done launch\n", sreq->sr.id);
 	sreq->sr.state = KGPU_REQ_RUNNING;
 	list_del(&sreq->list);
 	list_add_tail(&sreq->list, &running_reqs);
@@ -293,9 +284,7 @@ static int kh_post_exec(struct _kgpu_sritem *sreq)
 {
     int r = 1;
     if (gpu_execution_finished(&sreq->sr)) {
-	dbg("%d done exec\n", sreq->sr.id);
 	if (!(r = sreq->sr.s->post(&sreq->sr))) {
-	    dbg("%d done post\n", sreq->sr.id);
 	    sreq->sr.state = KGPU_REQ_POST_EXEC;
 	    list_del(&sreq->list);
 	    list_add_tail(&sreq->list, &post_exec_reqs);
@@ -312,7 +301,6 @@ static int kh_post_exec(struct _kgpu_sritem *sreq)
 static int kh_finish_post(struct _kgpu_sritem *sreq)
 {
     if (gpu_post_finished(&sreq->sr)) {
-	dbg("%d done finish post\n", sreq->sr.id);
 	sreq->sr.state = KGPU_REQ_DONE;
 	list_del(&sreq->list);
 	list_add_tail(&sreq->list, &done_reqs);
@@ -330,8 +318,6 @@ static int kh_service_done(struct _kgpu_sritem *sreq)
     resp.id = sreq->sr.id;
     resp.errcode = sreq->sr.errcode;
     
-    dbg("%d all done\n", sreq->sr.id);
-
     kh_send_response(&resp);
     
     list_del(&sreq->list);

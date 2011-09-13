@@ -369,9 +369,9 @@ static void do_benchmark(void)
     const struct raid6_calls **rc;
 
     if (replace_global)
-	rc = &oldcall;
+	rc = (const struct raid6_calls **)&oldcall;
     else
-	rc = &raid6_call;
+	rc = (const struct raid6_calls **)&raid6_call;
 
     gcall = &raid6_gpq;
 

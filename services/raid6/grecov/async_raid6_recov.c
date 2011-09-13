@@ -36,142 +36,142 @@ static struct dma_async_tx_descriptor *
 async_sum_product(struct page *dest, struct page **srcs, unsigned char *coef,
 		  size_t len, struct async_submit_ctl *submit)
 {
-	struct dma_chan *chan = async_tx_find_channel(submit, DMA_PQ,
-						      &dest, 1, srcs, 2, len);
-	struct dma_device *dma = chan ? chan->device : NULL;
-	const u8 *amul, *bmul;
-	u8 ax, bx;
-	u8 *a, *b, *c;
+    struct dma_chan *chan = async_tx_find_channel(submit, DMA_PQ,
+						  &dest, 1, srcs, 2, len);
+    struct dma_device *dma = chan ? chan->device : NULL;
+    const u8 *amul, *bmul;
+    u8 ax, bx;
+    u8 *a, *b, *c;
 
-	if (dma) {
-		dma_addr_t dma_dest[2];
-		dma_addr_t dma_src[2];
-		struct device *dev = dma->dev;
-		struct dma_async_tx_descriptor *tx;
-		enum dma_ctrl_flags dma_flags = DMA_PREP_PQ_DISABLE_P;
+    if (dma) {
+	dma_addr_t dma_dest[2];
+	dma_addr_t dma_src[2];
+	struct device *dev = dma->dev;
+	struct dma_async_tx_descriptor *tx;
+	enum dma_ctrl_flags dma_flags = DMA_PREP_PQ_DISABLE_P;
 
-		if (submit->flags & ASYNC_TX_FENCE)
-			dma_flags |= DMA_PREP_FENCE;
-		dma_dest[1] = dma_map_page(dev, dest, 0, len, DMA_BIDIRECTIONAL);
-		dma_src[0] = dma_map_page(dev, srcs[0], 0, len, DMA_TO_DEVICE);
-		dma_src[1] = dma_map_page(dev, srcs[1], 0, len, DMA_TO_DEVICE);
-		tx = dma->device_prep_dma_pq(chan, dma_dest, dma_src, 2, coef,
-					     len, dma_flags);
-		if (tx) {
-			async_tx_submit(chan, tx, submit);
-			return tx;
-		}
-
-		/* could not get a descriptor, unmap and fall through to
-		 * the synchronous path
-		 */
-		dma_unmap_page(dev, dma_dest[1], len, DMA_BIDIRECTIONAL);
-		dma_unmap_page(dev, dma_src[0], len, DMA_TO_DEVICE);
-		dma_unmap_page(dev, dma_src[1], len, DMA_TO_DEVICE);
+	if (submit->flags & ASYNC_TX_FENCE)
+	    dma_flags |= DMA_PREP_FENCE;
+	dma_dest[1] = dma_map_page(dev, dest, 0, len, DMA_BIDIRECTIONAL);
+	dma_src[0] = dma_map_page(dev, srcs[0], 0, len, DMA_TO_DEVICE);
+	dma_src[1] = dma_map_page(dev, srcs[1], 0, len, DMA_TO_DEVICE);
+	tx = dma->device_prep_dma_pq(chan, dma_dest, dma_src, 2, coef,
+				     len, dma_flags);
+	if (tx) {
+	    async_tx_submit(chan, tx, submit);
+	    return tx;
 	}
 
-	/* run the operation synchronously */
-	async_tx_quiesce(&submit->depend_tx);
-	amul = raid6_gfmul[coef[0]];
-	bmul = raid6_gfmul[coef[1]];
-	a = page_address(srcs[0]);
-	b = page_address(srcs[1]);
-	c = page_address(dest);
+	/* could not get a descriptor, unmap and fall through to
+	 * the synchronous path
+	 */
+	dma_unmap_page(dev, dma_dest[1], len, DMA_BIDIRECTIONAL);
+	dma_unmap_page(dev, dma_src[0], len, DMA_TO_DEVICE);
+	dma_unmap_page(dev, dma_src[1], len, DMA_TO_DEVICE);
+    }
 
-	while (len--) {
-		ax    = amul[*a++];
-		bx    = bmul[*b++];
-		*c++ = ax ^ bx;
-	}
+    /* run the operation synchronously */
+    async_tx_quiesce(&submit->depend_tx);
+    amul = raid6_gfmul[coef[0]];
+    bmul = raid6_gfmul[coef[1]];
+    a = page_address(srcs[0]);
+    b = page_address(srcs[1]);
+    c = page_address(dest);
 
-	return NULL;
+    while (len--) {
+	ax    = amul[*a++];
+	bx    = bmul[*b++];
+	*c++ = ax ^ bx;
+    }
+
+    return NULL;
 }
 
 static struct dma_async_tx_descriptor *
 async_mult(struct page *dest, struct page *src, u8 coef, size_t len,
 	   struct async_submit_ctl *submit)
 {
-	struct dma_chan *chan = async_tx_find_channel(submit, DMA_PQ,
-						      &dest, 1, &src, 1, len);
-	struct dma_device *dma = chan ? chan->device : NULL;
-	const u8 *qmul; /* Q multiplier table */
-	u8 *d, *s;
+    struct dma_chan *chan = async_tx_find_channel(submit, DMA_PQ,
+						  &dest, 1, &src, 1, len);
+    struct dma_device *dma = chan ? chan->device : NULL;
+    const u8 *qmul; /* Q multiplier table */
+    u8 *d, *s;
 
-	if (dma) {
-		dma_addr_t dma_dest[2];
-		dma_addr_t dma_src[1];
-		struct device *dev = dma->dev;
-		struct dma_async_tx_descriptor *tx;
-		enum dma_ctrl_flags dma_flags = DMA_PREP_PQ_DISABLE_P;
+    if (dma) {
+	dma_addr_t dma_dest[2];
+	dma_addr_t dma_src[1];
+	struct device *dev = dma->dev;
+	struct dma_async_tx_descriptor *tx;
+	enum dma_ctrl_flags dma_flags = DMA_PREP_PQ_DISABLE_P;
 
-		if (submit->flags & ASYNC_TX_FENCE)
-			dma_flags |= DMA_PREP_FENCE;
-		dma_dest[1] = dma_map_page(dev, dest, 0, len, DMA_BIDIRECTIONAL);
-		dma_src[0] = dma_map_page(dev, src, 0, len, DMA_TO_DEVICE);
-		tx = dma->device_prep_dma_pq(chan, dma_dest, dma_src, 1, &coef,
-					     len, dma_flags);
-		if (tx) {
-			async_tx_submit(chan, tx, submit);
-			return tx;
-		}
-
-		/* could not get a descriptor, unmap and fall through to
-		 * the synchronous path
-		 */
-		dma_unmap_page(dev, dma_dest[1], len, DMA_BIDIRECTIONAL);
-		dma_unmap_page(dev, dma_src[0], len, DMA_TO_DEVICE);
+	if (submit->flags & ASYNC_TX_FENCE)
+	    dma_flags |= DMA_PREP_FENCE;
+	dma_dest[1] = dma_map_page(dev, dest, 0, len, DMA_BIDIRECTIONAL);
+	dma_src[0] = dma_map_page(dev, src, 0, len, DMA_TO_DEVICE);
+	tx = dma->device_prep_dma_pq(chan, dma_dest, dma_src, 1, &coef,
+				     len, dma_flags);
+	if (tx) {
+	    async_tx_submit(chan, tx, submit);
+	    return tx;
 	}
 
-	/* no channel available, or failed to allocate a descriptor, so
-	 * perform the operation synchronously
+	/* could not get a descriptor, unmap and fall through to
+	 * the synchronous path
 	 */
-	async_tx_quiesce(&submit->depend_tx);
-	qmul  = raid6_gfmul[coef];
-	d = page_address(dest);
-	s = page_address(src);
+	dma_unmap_page(dev, dma_dest[1], len, DMA_BIDIRECTIONAL);
+	dma_unmap_page(dev, dma_src[0], len, DMA_TO_DEVICE);
+    }
 
-	while (len--)
-		*d++ = qmul[*s++];
+    /* no channel available, or failed to allocate a descriptor, so
+     * perform the operation synchronously
+     */
+    async_tx_quiesce(&submit->depend_tx);
+    qmul  = raid6_gfmul[coef];
+    d = page_address(dest);
+    s = page_address(src);
 
-	return NULL;
+    while (len--)
+	*d++ = qmul[*s++];
+
+    return NULL;
 }
 
 static struct dma_async_tx_descriptor *
 __2data_recov_4(int disks, size_t bytes, int faila, int failb,
 		struct page **blocks, struct async_submit_ctl *submit)
 {
-	struct dma_async_tx_descriptor *tx = NULL;
-	struct page *p, *q, *a, *b;
-	struct page *srcs[2];
-	unsigned char coef[2];
-	enum async_tx_flags flags = submit->flags;
-	dma_async_tx_callback cb_fn = submit->cb_fn;
-	void *cb_param = submit->cb_param;
-	void *scribble = submit->scribble;
+    struct dma_async_tx_descriptor *tx = NULL;
+    struct page *p, *q, *a, *b;
+    struct page *srcs[2];
+    unsigned char coef[2];
+    enum async_tx_flags flags = submit->flags;
+    dma_async_tx_callback cb_fn = submit->cb_fn;
+    void *cb_param = submit->cb_param;
+    void *scribble = submit->scribble;
 
-	p = blocks[disks-2];
-	q = blocks[disks-1];
+    p = blocks[disks-2];
+    q = blocks[disks-1];
 
-	a = blocks[faila];
-	b = blocks[failb];
+    a = blocks[faila];
+    b = blocks[failb];
 
-	/* in the 4 disk case P + Pxy == P and Q + Qxy == Q */
-	/* Dx = A*(P+Pxy) + B*(Q+Qxy) */
-	srcs[0] = p;
-	srcs[1] = q;
-	coef[0] = raid6_gfexi[failb-faila];
-	coef[1] = raid6_gfinv[raid6_gfexp[faila]^raid6_gfexp[failb]];
-	init_async_submit(submit, ASYNC_TX_FENCE, tx, NULL, NULL, scribble);
-	tx = async_sum_product(b, srcs, coef, bytes, submit);
+    /* in the 4 disk case P + Pxy == P and Q + Qxy == Q */
+    /* Dx = A*(P+Pxy) + B*(Q+Qxy) */
+    srcs[0] = p;
+    srcs[1] = q;
+    coef[0] = raid6_gfexi[failb-faila];
+    coef[1] = raid6_gfinv[raid6_gfexp[faila]^raid6_gfexp[failb]];
+    init_async_submit(submit, ASYNC_TX_FENCE, tx, NULL, NULL, scribble);
+    tx = async_sum_product(b, srcs, coef, bytes, submit);
 
-	/* Dy = P+Pxy+Dx */
-	srcs[0] = p;
-	srcs[1] = b;
-	init_async_submit(submit, flags | ASYNC_TX_XOR_ZERO_DST, tx, cb_fn,
-			  cb_param, scribble);
-	tx = async_xor(a, srcs, 0, 2, bytes, submit);
+    /* Dy = P+Pxy+Dx */
+    srcs[0] = p;
+    srcs[1] = b;
+    init_async_submit(submit, flags | ASYNC_TX_XOR_ZERO_DST, tx, cb_fn,
+		      cb_param, scribble);
+    tx = async_xor(a, srcs, 0, 2, bytes, submit);
 
-	return tx;
+    return tx;
 
 }
 
@@ -179,142 +179,142 @@ static struct dma_async_tx_descriptor *
 __2data_recov_5(int disks, size_t bytes, int faila, int failb,
 		struct page **blocks, struct async_submit_ctl *submit)
 {
-	struct dma_async_tx_descriptor *tx = NULL;
-	struct page *p, *q, *g, *dp, *dq;
-	struct page *srcs[2];
-	unsigned char coef[2];
-	enum async_tx_flags flags = submit->flags;
-	dma_async_tx_callback cb_fn = submit->cb_fn;
-	void *cb_param = submit->cb_param;
-	void *scribble = submit->scribble;
-	int good_srcs, good, i;
+    struct dma_async_tx_descriptor *tx = NULL;
+    struct page *p, *q, *g, *dp, *dq;
+    struct page *srcs[2];
+    unsigned char coef[2];
+    enum async_tx_flags flags = submit->flags;
+    dma_async_tx_callback cb_fn = submit->cb_fn;
+    void *cb_param = submit->cb_param;
+    void *scribble = submit->scribble;
+    int good_srcs, good, i;
 
-	good_srcs = 0;
-	good = -1;
-	for (i = 0; i < disks-2; i++) {
-		if (blocks[i] == NULL)
-			continue;
-		if (i == faila || i == failb)
-			continue;
-		good = i;
-		good_srcs++;
-	}
-	BUG_ON(good_srcs > 1);
+    good_srcs = 0;
+    good = -1;
+    for (i = 0; i < disks-2; i++) {
+	if (blocks[i] == NULL)
+	    continue;
+	if (i == faila || i == failb)
+	    continue;
+	good = i;
+	good_srcs++;
+    }
+    BUG_ON(good_srcs > 1);
 
-	p = blocks[disks-2];
-	q = blocks[disks-1];
-	g = blocks[good];
+    p = blocks[disks-2];
+    q = blocks[disks-1];
+    g = blocks[good];
 
-	/* Compute syndrome with zero for the missing data pages
-	 * Use the dead data pages as temporary storage for delta p and
-	 * delta q
-	 */
-	dp = blocks[faila];
-	dq = blocks[failb];
+    /* Compute syndrome with zero for the missing data pages
+     * Use the dead data pages as temporary storage for delta p and
+     * delta q
+     */
+    dp = blocks[faila];
+    dq = blocks[failb];
 
-	init_async_submit(submit, ASYNC_TX_FENCE, tx, NULL, NULL, scribble);
-	tx = async_memcpy(dp, g, 0, 0, bytes, submit);
-	init_async_submit(submit, ASYNC_TX_FENCE, tx, NULL, NULL, scribble);
-	tx = async_mult(dq, g, raid6_gfexp[good], bytes, submit);
+    init_async_submit(submit, ASYNC_TX_FENCE, tx, NULL, NULL, scribble);
+    tx = async_memcpy(dp, g, 0, 0, bytes, submit);
+    init_async_submit(submit, ASYNC_TX_FENCE, tx, NULL, NULL, scribble);
+    tx = async_mult(dq, g, raid6_gfexp[good], bytes, submit);
 
-	/* compute P + Pxy */
-	srcs[0] = dp;
-	srcs[1] = p;
-	init_async_submit(submit, ASYNC_TX_FENCE|ASYNC_TX_XOR_DROP_DST, tx,
-			  NULL, NULL, scribble);
-	tx = async_xor(dp, srcs, 0, 2, bytes, submit);
+    /* compute P + Pxy */
+    srcs[0] = dp;
+    srcs[1] = p;
+    init_async_submit(submit, ASYNC_TX_FENCE|ASYNC_TX_XOR_DROP_DST, tx,
+		      NULL, NULL, scribble);
+    tx = async_xor(dp, srcs, 0, 2, bytes, submit);
 
-	/* compute Q + Qxy */
-	srcs[0] = dq;
-	srcs[1] = q;
-	init_async_submit(submit, ASYNC_TX_FENCE|ASYNC_TX_XOR_DROP_DST, tx,
-			  NULL, NULL, scribble);
-	tx = async_xor(dq, srcs, 0, 2, bytes, submit);
+    /* compute Q + Qxy */
+    srcs[0] = dq;
+    srcs[1] = q;
+    init_async_submit(submit, ASYNC_TX_FENCE|ASYNC_TX_XOR_DROP_DST, tx,
+		      NULL, NULL, scribble);
+    tx = async_xor(dq, srcs, 0, 2, bytes, submit);
 
-	/* Dx = A*(P+Pxy) + B*(Q+Qxy) */
-	srcs[0] = dp;
-	srcs[1] = dq;
-	coef[0] = raid6_gfexi[failb-faila];
-	coef[1] = raid6_gfinv[raid6_gfexp[faila]^raid6_gfexp[failb]];
-	init_async_submit(submit, ASYNC_TX_FENCE, tx, NULL, NULL, scribble);
-	tx = async_sum_product(dq, srcs, coef, bytes, submit);
+    /* Dx = A*(P+Pxy) + B*(Q+Qxy) */
+    srcs[0] = dp;
+    srcs[1] = dq;
+    coef[0] = raid6_gfexi[failb-faila];
+    coef[1] = raid6_gfinv[raid6_gfexp[faila]^raid6_gfexp[failb]];
+    init_async_submit(submit, ASYNC_TX_FENCE, tx, NULL, NULL, scribble);
+    tx = async_sum_product(dq, srcs, coef, bytes, submit);
 
-	/* Dy = P+Pxy+Dx */
-	srcs[0] = dp;
-	srcs[1] = dq;
-	init_async_submit(submit, flags | ASYNC_TX_XOR_DROP_DST, tx, cb_fn,
-			  cb_param, scribble);
-	tx = async_xor(dp, srcs, 0, 2, bytes, submit);
+    /* Dy = P+Pxy+Dx */
+    srcs[0] = dp;
+    srcs[1] = dq;
+    init_async_submit(submit, flags | ASYNC_TX_XOR_DROP_DST, tx, cb_fn,
+		      cb_param, scribble);
+    tx = async_xor(dp, srcs, 0, 2, bytes, submit);
 
-	return tx;
+    return tx;
 }
 
 static struct dma_async_tx_descriptor *
 __2data_recov_n(int disks, size_t bytes, int faila, int failb,
-	      struct page **blocks, struct async_submit_ctl *submit)
+		struct page **blocks, struct async_submit_ctl *submit)
 {
-	struct dma_async_tx_descriptor *tx = NULL;
-	struct page *p, *q, *dp, *dq;
-	struct page *srcs[2];
-	unsigned char coef[2];
-	enum async_tx_flags flags = submit->flags;
-	dma_async_tx_callback cb_fn = submit->cb_fn;
-	void *cb_param = submit->cb_param;
-	void *scribble = submit->scribble;
+    struct dma_async_tx_descriptor *tx = NULL;
+    struct page *p, *q, *dp, *dq;
+    struct page *srcs[2];
+    unsigned char coef[2];
+    enum async_tx_flags flags = submit->flags;
+    dma_async_tx_callback cb_fn = submit->cb_fn;
+    void *cb_param = submit->cb_param;
+    void *scribble = submit->scribble;
 
-	p = blocks[disks-2];
-	q = blocks[disks-1];
+    p = blocks[disks-2];
+    q = blocks[disks-1];
 
-	/* Compute syndrome with zero for the missing data pages
-	 * Use the dead data pages as temporary storage for
-	 * delta p and delta q
-	 */
-	dp = blocks[faila];
-	blocks[faila] = NULL;
-	blocks[disks-2] = dp;
-	dq = blocks[failb];
-	blocks[failb] = NULL;
-	blocks[disks-1] = dq;
+    /* Compute syndrome with zero for the missing data pages
+     * Use the dead data pages as temporary storage for
+     * delta p and delta q
+     */
+    dp = blocks[faila];
+    blocks[faila] = NULL;
+    blocks[disks-2] = dp;
+    dq = blocks[failb];
+    blocks[failb] = NULL;
+    blocks[disks-1] = dq;
 
-	init_async_submit(submit, ASYNC_TX_FENCE, tx, NULL, NULL, scribble);
-	tx = async_gen_syndrome(blocks, 0, disks, bytes, submit);
+    init_async_submit(submit, ASYNC_TX_FENCE, tx, NULL, NULL, scribble);
+    tx = async_gen_syndrome(blocks, 0, disks, bytes, submit);
 
-	/* Restore pointer table */
-	blocks[faila]   = dp;
-	blocks[failb]   = dq;
-	blocks[disks-2] = p;
-	blocks[disks-1] = q;
+    /* Restore pointer table */
+    blocks[faila]   = dp;
+    blocks[failb]   = dq;
+    blocks[disks-2] = p;
+    blocks[disks-1] = q;
 
-	/* compute P + Pxy */
-	srcs[0] = dp;
-	srcs[1] = p;
-	init_async_submit(submit, ASYNC_TX_FENCE|ASYNC_TX_XOR_DROP_DST, tx,
-			  NULL, NULL, scribble);
-	tx = async_xor(dp, srcs, 0, 2, bytes, submit);
+    /* compute P + Pxy */
+    srcs[0] = dp;
+    srcs[1] = p;
+    init_async_submit(submit, ASYNC_TX_FENCE|ASYNC_TX_XOR_DROP_DST, tx,
+		      NULL, NULL, scribble);
+    tx = async_xor(dp, srcs, 0, 2, bytes, submit);
 
-	/* compute Q + Qxy */
-	srcs[0] = dq;
-	srcs[1] = q;
-	init_async_submit(submit, ASYNC_TX_FENCE|ASYNC_TX_XOR_DROP_DST, tx,
-			  NULL, NULL, scribble);
-	tx = async_xor(dq, srcs, 0, 2, bytes, submit);
+    /* compute Q + Qxy */
+    srcs[0] = dq;
+    srcs[1] = q;
+    init_async_submit(submit, ASYNC_TX_FENCE|ASYNC_TX_XOR_DROP_DST, tx,
+		      NULL, NULL, scribble);
+    tx = async_xor(dq, srcs, 0, 2, bytes, submit);
 
-	/* Dx = A*(P+Pxy) + B*(Q+Qxy) */
-	srcs[0] = dp;
-	srcs[1] = dq;
-	coef[0] = raid6_gfexi[failb-faila];
-	coef[1] = raid6_gfinv[raid6_gfexp[faila]^raid6_gfexp[failb]];
-	init_async_submit(submit, ASYNC_TX_FENCE, tx, NULL, NULL, scribble);
-	tx = async_sum_product(dq, srcs, coef, bytes, submit);
+    /* Dx = A*(P+Pxy) + B*(Q+Qxy) */
+    srcs[0] = dp;
+    srcs[1] = dq;
+    coef[0] = raid6_gfexi[failb-faila];
+    coef[1] = raid6_gfinv[raid6_gfexp[faila]^raid6_gfexp[failb]];
+    init_async_submit(submit, ASYNC_TX_FENCE, tx, NULL, NULL, scribble);
+    tx = async_sum_product(dq, srcs, coef, bytes, submit);
 
-	/* Dy = P+Pxy+Dx */
-	srcs[0] = dp;
-	srcs[1] = dq;
-	init_async_submit(submit, flags | ASYNC_TX_XOR_DROP_DST, tx, cb_fn,
-			  cb_param, scribble);
-	tx = async_xor(dp, srcs, 0, 2, bytes, submit);
+    /* Dy = P+Pxy+Dx */
+    srcs[0] = dp;
+    srcs[1] = dq;
+    init_async_submit(submit, flags | ASYNC_TX_XOR_DROP_DST, tx, cb_fn,
+		      cb_param, scribble);
+    tx = async_xor(dp, srcs, 0, 2, bytes, submit);
 
-	return tx;
+    return tx;
 }
 
 /*
@@ -329,6 +329,9 @@ __2data_recov_n(int disks, size_t bytes, int faila, int failb,
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/completion.h>
+#include <linux/kthread.h>
+#include <linux/wait.h>
+#include <asm/atomic.h>
 #include "../../../kgpu/kgpu.h"
 #include "../r62_recov.h"
 
@@ -336,13 +339,15 @@ __2data_recov_n(int disks, size_t bytes, int faila, int failb,
 #define R62_REQUEST_HANDLE 1
 #define R62_REQUEST_DONE   2
 #define R62_REQUEST_ERROR  3
+#define R62_REQUEST_SYNGEN 4
 
-#define R62_WAIT_TIMEOUT (1)
+#define R62_WAIT_TIMEOUT (10)
 
 struct r62_request {
+    long id;
     int disks;
     size_t bytes;
-    struct page **blocks;
+    u8 **blocks;
     int faila, failb;
     struct list_head list;
     int status;
@@ -351,20 +356,32 @@ struct r62_request {
 
 struct r62_data {
     struct list_head reqs;
+    struct semaphore reqsem;
     spinlock_t reqlock;
     int nr;
+    atomic_long_t seq;
+    struct task_struct *kt;
+    wait_queue_head_t ktwait;
 };
 
 static struct kmem_cache *r62_request_cache;
 static struct r62_data r62dat;
 
-static int r62_max_reqs = 16;
-module_param(r62_max_reqs, int, 16);
+static int r62_max_reqs = 8;
+module_param(r62_max_reqs, int, 8);
 MODULE_PARM_DESC(r62_max_reqs, "max request queue size");
 
-static int use_cpu = 1;
-module_param(use_cpu, int, 1);
+static int use_cpu = 0;
+module_param(use_cpu, int, 0);
 MODULE_PARM_DESC(use_cpu, "use cpu 2data recovery");
+
+static int use_sim = 0;
+module_param(use_sim, int, 0);
+MODULE_PARM_DESC(use_cpu, "use cpu simulation for GPU call");
+
+#define do_log(level, ...) kgpu_do_log(level, "r62_recov", ##__VA_ARGS__)
+#define prnt(...) 
+//do_log(KGPU_LOG_PRINT, ##__VA_ARGS__)
 
 static void r62_request_ctr(void *data)
 {
@@ -372,39 +389,46 @@ static void r62_request_ctr(void *data)
 
     INIT_LIST_HEAD(&r->list);
     r->status = R62_REQUEST_WAIT;
-    init_completion(&r->c);
+    init_completion(&r->c);    
+    r->id = atomic_long_inc_return(&r62dat.seq);    
 }
 
-static void init_gpu_system(void)
+static int sim_gpu_call(struct kgpu_request *r)
 {
-    r62_request_cache = kmem_cache_create(
-	"r62_request_cache",
-	sizeof(struct r62_request), 0,
-	SLAB_HWCACHE_ALIGN, r62_request_ctr);
-    if (!r62_request_cache) {
-	printk("[async_raid6_recov] Error: can't creat request cache\n");
-	return;
+    struct r62_recov_data *data = (struct r62_recov_data*)r->udata;
+    u8 *p, *q, *dp, *dq;
+    u8 px, qx;
+    const u8 *pbmul;
+    const u8 *qmul;
+	
+    int i, j;
+	
+    p = (u8*)r->in;
+    q = p+data->n*PAGE_SIZE;
+    dp = (u8*)r->out;
+    dq = dp+data->n*PAGE_SIZE;
+	
+    for (i=0; i<data->n; i++) {
+	pbmul = raid6_gfmul[data->idx[i].pbidx];
+	qmul  = raid6_gfmul[data->idx[i].qidx];
+	for (j=0; j<PAGE_SIZE; j++) {
+	    int id = j + i*PAGE_SIZE;
+	    px = p[id] ^ dp[id];
+	    qx = qmul[q[id] ^ dq[id]];
+	    dq[id] = pbmul[px] ^ qx;
+	    dp[id] = dq[id] ^ px;
+	}
     }
-
-    spin_lock_init(&r62dat.reqlock);
-    INIT_LIST_HEAD(&r62dat.reqs);
-    r62dat.nr = 0;
-}
-
-static void finit_gpu_system(void)
-{
-    if (r62_request_cache)
-	kmem_cache_destroy(r62_request_cache);
+	
+    return 0;
 }
 
 static void process_r62_requests(struct list_head *reqs, int n, size_t tsz)
 {
     u8 *p, *q, *dp, *dq;
-    struct list_head *pos;
+    struct list_head *pos, *tmp;
     struct r62_request *r = NULL;
     int i, j;
-
-    void **ptrs = NULL;
 
     struct kgpu_request *greq = NULL;
     u8 *gbuf = NULL;
@@ -416,13 +440,13 @@ static void process_r62_requests(struct list_head *reqs, int n, size_t tsz)
     gbuf = (u8*)kgpu_vmalloc(2*rsz+round_up(dsz, PAGE_SIZE));
 			     
     if (!gbuf) {
-	printk("[async_raid6_recov] Error: out of GPU mem\n");
+	do_log(KGPU_LOG_ERROR, "out of GPU mem\n");
 	goto fail_out;
     }
 
     greq = kgpu_alloc_request();
     if (!greq) {
-	printk("[async_raid6_recov] Error: can't alloc GPU request\n");
+	do_log(KGPU_LOG_ERROR, "can't alloc GPU request\n");
 	goto fail_out;
     }
 
@@ -443,38 +467,37 @@ static void process_r62_requests(struct list_head *reqs, int n, size_t tsz)
     dq = dp + (n*PAGE_SIZE);
 
     j = 0;
-    list_for_each(pos, reqs) {
+    list_for_each_safe(pos, tmp, reqs) {
 	u8 *tp, *tq, *tdp, *tdq;
 	r = list_entry(pos, struct r62_request, list);
 
-	if (!ptrs) {
-	    ptrs = (void**)kmalloc(sizeof(void*)*r->disks, GFP_KERNEL);
-	    if (!ptrs) {
-		printk("[async_raid6_recov] Error: out of mem for ptrs\n");
-		goto fail_out;
-	    }
-	}
+	tp = r->blocks[r->disks-2];
+	tq = r->blocks[r->disks-1];
 
+        tdp = r->blocks[r->faila];
+	r->blocks[r->faila] = (void *)raid6_empty_zero_page;
+	r->blocks[r->disks-2] = tdp;
+	tdq = r->blocks[r->failb];
+	r->blocks[r->failb] = (void *)raid6_empty_zero_page;
+	r->blocks[r->disks-1] = tdq;
+	
 	for (i=0; i<r->disks; i++) {
-	    ptrs[i] = page_address(r->blocks[i]);	    
+	    if (!r->blocks[i])
+		break;
 	}
+	
+	if (i== r->disks)
+	    raid6_call.gen_syndrome(r->disks, r->bytes, (void**)r->blocks);
+	else {
+	    prnt("NULL pointer at req %lu %d blk\n", r->id, i);
+	}
+	
+	r->status = R62_REQUEST_SYNGEN;
 
-	tp = (u8*)ptrs[r->disks-2];
-	tq = (u8*)ptrs[r->disks-1];
-
-        tdp = (u8 *)ptrs[r->faila];
-	ptrs[r->faila] = (void *)raid6_empty_zero_page;
-	ptrs[r->disks-2] = tdp;
-	tdq = (u8 *)ptrs[r->failb];
-	ptrs[r->failb] = (void *)raid6_empty_zero_page;
-	ptrs[r->disks-1] = tdq;
-
-	raid6_call.gen_syndrome(r->disks, r->bytes, ptrs);
-
-	ptrs[r->faila]   = tdp;
-	ptrs[r->failb]   = tdq;
-	ptrs[r->disks-2] = tp;
-	ptrs[r->disks-1] = tq;
+	r->blocks[r->faila]   = tdp;
+	r->blocks[r->failb]   = tdq;
+	r->blocks[r->disks-2] = tp;
+	r->blocks[r->disks-1] = tq;
 
 	data->idx[j].pbidx = raid6_gfexi[r->failb - r->faila];
 	data->idx[j].qidx  = raid6_gfinv[raid6_gfexp[r->faila]^raid6_gfexp[r->failb]];
@@ -491,28 +514,34 @@ static void process_r62_requests(struct list_head *reqs, int n, size_t tsz)
 	memcpy(dq+(j<<PAGE_SHIFT),
 	       tdq,//page_address(r->blocks[r->failb]),
 	       PAGE_SIZE);
+	       
+	prnt("handle req %lu %d\n", r->id, j);
 	
 	j++;
     }
-
-    if (ptrs) kfree(ptrs);
     
     strcpy(greq->service_name, "r62_recov");
     
-    if (kgpu_call_sync(greq)) {
-	printk("[async_raid6_recov] Error: call gpu failed\n");
+    prnt("submit GPU request %d\n", greq->id);
+    
+    if (use_sim? sim_gpu_call(greq):kgpu_call_sync(greq)) {
+	do_log(KGPU_LOG_ERROR, "call gpu failed\n");
 	goto fail_out;
     } else {
+    	prnt("done GPU request %d\n", greq->id);
 	j = 0;
-	list_for_each(pos, reqs) {
+	list_for_each_safe(pos, tmp, reqs) {
 	    r = list_entry(pos, struct r62_request, list);
 	    
-	    memcpy(page_address(r->blocks[r->faila]),
+	    memcpy(r->blocks[r->faila],
 		   dp+(j<<PAGE_SHIFT), PAGE_SIZE);
-	    memcpy(page_address(r->blocks[r->failb]),
+	    memcpy(r->blocks[r->failb],
 		   dq+(j<<PAGE_SHIFT), PAGE_SIZE);
+		   
+	    list_del(pos);
 	    
 	    r->status = R62_REQUEST_DONE;
+	    prnt("to complete req %lu %d\n", r->id, j);
 	    complete(&r->c);
 	    j++;
 	}
@@ -520,10 +549,12 @@ static void process_r62_requests(struct list_head *reqs, int n, size_t tsz)
     }
 
 fail_out:
-    list_for_each(pos, reqs) {
+    list_for_each_safe(pos, tmp, reqs) {
 	r = list_entry(pos, struct r62_request, list);
+	list_del(pos);
 	r->status = R62_REQUEST_ERROR;
 	complete(&r->c);
+	prnt("done req %lu with error\n", r->id);
     }
     
 free_out:
@@ -531,19 +562,92 @@ free_out:
     if (greq) kgpu_free_request(greq);
 }
 
+// with r62dat.reqlock on hold
+static int take_off_requests(struct list_head *reqs)
+{
+    int n = 0;
+    struct list_head *pos, *tmp;
+    struct r62_request *ite;
+    list_replace_init(&r62dat.reqs, reqs);
+
+    list_for_each_safe(pos, tmp, reqs) {
+	ite = list_entry(pos, struct r62_request, list);
+	ite->status = R62_REQUEST_HANDLE;
+	n++;
+	prnt("off req %lu\n", ite->id);
+    }
+
+    r62dat.nr = 0;
+    return n;
+}
+
+static int r62d(void *data)
+{
+    int n;
+    struct list_head reqs;
+	
+    while(1) {
+	wait_event_timeout(r62dat.ktwait,
+			   r62dat.nr >= r62_max_reqs,
+			   R62_WAIT_TIMEOUT);
+		
+	spin_lock_irq(&r62dat.reqlock);
+	n = take_off_requests(&reqs);
+	spin_unlock_irq(&r62dat.reqlock);
+		
+	if (n) {
+	    process_r62_requests(&reqs, n, n*PAGE_SIZE);
+	}
+		
+	if (kthread_should_stop())
+	    break;
+    }
+    return 0;
+}
+
+static void init_gpu_system(void)
+{
+    r62_request_cache = kmem_cache_create(
+	"r62_request_cache",
+	sizeof(struct r62_request), 0,
+	SLAB_HWCACHE_ALIGN, r62_request_ctr);
+    if (!r62_request_cache) {
+	do_log(KGPU_LOG_ERROR, "can't creat request cache\n");
+	return;
+    }
+    
+    atomic_long_set(&r62dat.seq, 0);
+    INIT_LIST_HEAD(&r62dat.reqs);
+    r62dat.nr = 0;
+    sema_init(&r62dat.reqsem, 1);
+    spin_lock_init(&r62dat.reqlock);
+    
+    init_waitqueue_head(&r62dat.ktwait);
+    
+    r62dat.kt = kthread_run(r62d, NULL, "r62d");
+    if (!r62dat.kt) {
+    	do_log(KGPU_LOG_ERROR, "can't create kernel thread\n");
+    }
+}
+
+static void finit_gpu_system(void)
+{
+    if (r62_request_cache)
+	kmem_cache_destroy(r62_request_cache);
+	
+    if (r62dat.kt)
+	kthread_stop(r62dat.kt);
+}
+
 
 static void gpu_async_raid6_2drecov(int disks, size_t bytes,
-					int faila, int failb,
-					struct page **blocks)
-{
-    struct list_head reqs, *pos;
-    struct r62_request *ite;
-    int n;
-    size_t tsz;
+				    int faila, int failb,
+				    u8 **blocks)
+{ 
     struct r62_request *r = kmem_cache_alloc(r62_request_cache,
-					     GFP_KERNEL|__GFP_ZERO);
+					     GFP_KERNEL);
     if (!r) {
-	printk("[async_raid6_recov] Error: out of memory for r62_request\n");
+	do_log(KGPU_LOG_ERROR, "out of memory for r62_request\n");
 	return;
     }
     r->disks = disks;
@@ -551,53 +655,22 @@ static void gpu_async_raid6_2drecov(int disks, size_t bytes,
     r->faila = faila;
     r->failb = failb;
     r->blocks = blocks;
-    init_completion(&r->c);
-    r->status = R62_REQUEST_WAIT;
 
-    spin_lock(&r62dat.reqlock);
+    spin_lock_irq(&r62dat.reqlock);
     list_add_tail(&r->list, &r62dat.reqs);
     r62dat.nr++;
-    if (r62dat.nr >= r62_max_reqs) {
-	goto do_process; // Yeah! I like GOTO!
+    if (r62dat.nr >= r62_max_reqs) {    	
+    	spin_unlock_irq(&r62dat.reqlock);
+    	wake_up_all(&r62dat.ktwait);
+    	prnt("reach max reqs\n");
+    } else {
+    	spin_unlock_irq(&r62dat.reqlock);
+    	prnt("req %lu added\n", r->id);    	
     }
-    spin_unlock(&r62dat.reqlock);    
-
-retry:
-    if (wait_for_completion_interruptible_timeout(
-	    &r->c, R62_WAIT_TIMEOUT))
-    { // timeout
-	spin_lock(&r62dat.reqlock);
-	if (r->status == R62_REQUEST_WAIT) {
-	do_process:
-	    n = 0;
-	    tsz = 0;
-	    reqs.next = r62dat.reqs.next;
-	    reqs.prev = r62dat.reqs.prev;
-	    reqs.next->prev = &reqs;
-	    reqs.prev->next = &reqs;
-	    INIT_LIST_HEAD(&r62dat.reqs);
-
-	    list_for_each(pos, &reqs) {
-		ite = list_entry(pos, struct r62_request, list);
-		ite->status = R62_REQUEST_HANDLE;
-		n++;
-		tsz += ite->bytes;
-	    }
-
-	    r62dat.nr = 0;
-
-	    spin_unlock(&r62dat.reqlock);
-
-	    process_r62_requests(&reqs, n, tsz);
-	} else {
-	    spin_unlock(&r62dat.reqlock);
-	    goto retry;
-	}
-	    
-    } /*else if (!completion_done(&r->c)) {
-	goto retry;
-    }*/
-
+    
+    wait_for_completion(&r->c);
+    
+    prnt("req %lu finished\n", r->id);
     kmem_cache_free(r62_request_cache, r);
 }
 
@@ -629,81 +702,87 @@ struct dma_async_tx_descriptor *
 async_raid6_2data_recov(int disks, size_t bytes, int faila, int failb,
 			struct page **blocks, struct async_submit_ctl *submit)
 {
-	void *scribble = submit->scribble;
-	int non_zero_srcs, i;
+    void *scribble = submit->scribble;
+    int non_zero_srcs, i;
 
-	BUG_ON(faila == failb);
-	if (failb < faila)
-		swap(faila, failb);
+    BUG_ON(faila == failb);
+    if (failb < faila)
+	swap(faila, failb);
 
-	/* if a dma resource is not available or a scribble buffer is not
-	 * available punt to the synchronous path.  In the 'dma not
-	 * available' case be sure to use the scribble buffer to
-	 * preserve the content of 'blocks' as the caller intended.
-	 */
-	if (!async_dma_find_channel(DMA_PQ) || !scribble) {
+    /* if a dma resource is not available or a scribble buffer is not
+     * available punt to the synchronous path.  In the 'dma not
+     * available' case be sure to use the scribble buffer to
+     * preserve the content of 'blocks' as the caller intended.
+     */
+    if (!async_dma_find_channel(DMA_PQ) || !scribble) {
 
-	    async_tx_quiesce(&submit->depend_tx);
+	async_tx_quiesce(&submit->depend_tx);
 
-	    if (!use_cpu) {
-		struct page **ptrs = scribble ?
-		    (struct page **)scribble : (struct page **) blocks;
+	if (!use_cpu && bytes == PAGE_SIZE) {
+	    u8 **ptrs = kmalloc(sizeof(u8*)*disks, GFP_KERNEL);
 			    
-		for (i = 0; i < disks; i++)
-		    if (blocks[i] == NULL)
-			ptrs[i] = virt_to_page((void *) raid6_empty_zero_page);
-		    else
-			ptrs[i] = blocks[i];
+	    for (i = 0; i < disks; i++)
+		if (blocks[i] == NULL)
+		    ptrs[i] = (u8 *) raid6_empty_zero_page;
+		else
+		    ptrs[i] = (u8*)page_address(blocks[i]);
+			
+	    prnt("gpu recov %d dsks, %lu bytes failed: %d %d\n", disks, bytes, faila, failb);
 	    
-		gpu_async_raid6_2drecov(disks,
-					bytes,
-					faila,
-					failb,
-					ptrs);
-	    } else {	    
-		void **ptrs = scribble ? scribble : (void **) blocks;
-	    
-		for (i = 0; i < disks; i++)
-		    if (blocks[i] == NULL)
-			ptrs[i] = (void *) raid6_empty_zero_page;
-		    else
-			ptrs[i] = page_address(blocks[i]);
+	    gpu_async_raid6_2drecov(disks,
+				    bytes,
+				    faila,
+				    failb,
+				    ptrs);
+	    kfree(ptrs);
+	} else {	    
+	    void **ptrs = scribble ? scribble : (void **) blocks;
 		
-		raid6_2data_recov(disks, bytes, faila, failb, ptrs);
+	    if (bytes != PAGE_SIZE) {
+		prnt("non-page size %lu\n", bytes);
 	    }
 	    
-	    async_tx_sync_epilog(submit);
+	    for (i = 0; i < disks; i++)
+		if (blocks[i] == NULL)
+		    ptrs[i] = (void *) raid6_empty_zero_page;
+		else
+		    ptrs[i] = page_address(blocks[i]);
+		
+	    raid6_2data_recov(disks, bytes, faila, failb, ptrs);
+	}
 	    
-	    return NULL;
-	}
+	async_tx_sync_epilog(submit);
+	    
+	return NULL;
+    }
 
-	non_zero_srcs = 0;
-	for (i = 0; i < disks-2 && non_zero_srcs < 4; i++)
-		if (blocks[i])
-			non_zero_srcs++;
-	switch (non_zero_srcs) {
-	case 0:
-	case 1:
-		/* There must be at least 2 sources - the failed devices. */
-		BUG();
+    non_zero_srcs = 0;
+    for (i = 0; i < disks-2 && non_zero_srcs < 4; i++)
+	if (blocks[i])
+	    non_zero_srcs++;
+    switch (non_zero_srcs) {
+    case 0:
+    case 1:
+	/* There must be at least 2 sources - the failed devices. */
+	BUG();
 
-	case 2:
-		/* dma devices do not uniformly understand a zero source pq
-		 * operation (in contrast to the synchronous case), so
-		 * explicitly handle the special case of a 4 disk array with
-		 * both data disks missing.
-		 */
-		return __2data_recov_4(disks, bytes, faila, failb, blocks, submit);
-	case 3:
-		/* dma devices do not uniformly understand a single
-		 * source pq operation (in contrast to the synchronous
-		 * case), so explicitly handle the special case of a 5 disk
-		 * array with 2 of 3 data disks missing.
-		 */
-		return __2data_recov_5(disks, bytes, faila, failb, blocks, submit);
-	default:
-		return __2data_recov_n(disks, bytes, faila, failb, blocks, submit);
-	}
+    case 2:
+	/* dma devices do not uniformly understand a zero source pq
+	 * operation (in contrast to the synchronous case), so
+	 * explicitly handle the special case of a 4 disk array with
+	 * both data disks missing.
+	 */
+	return __2data_recov_4(disks, bytes, faila, failb, blocks, submit);
+    case 3:
+	/* dma devices do not uniformly understand a single
+	 * source pq operation (in contrast to the synchronous
+	 * case), so explicitly handle the special case of a 5 disk
+	 * array with 2 of 3 data disks missing.
+	 */
+	return __2data_recov_5(disks, bytes, faila, failb, blocks, submit);
+    default:
+	return __2data_recov_n(disks, bytes, faila, failb, blocks, submit);
+    }
 }
 EXPORT_SYMBOL_GPL(async_raid6_2data_recov);
 
@@ -719,104 +798,104 @@ struct dma_async_tx_descriptor *
 async_raid6_datap_recov(int disks, size_t bytes, int faila,
 			struct page **blocks, struct async_submit_ctl *submit)
 {
-	struct dma_async_tx_descriptor *tx = NULL;
-	struct page *p, *q, *dq;
-	u8 coef;
-	enum async_tx_flags flags = submit->flags;
-	dma_async_tx_callback cb_fn = submit->cb_fn;
-	void *cb_param = submit->cb_param;
-	void *scribble = submit->scribble;
-	int good_srcs, good, i;
-	struct page *srcs[2];
+    struct dma_async_tx_descriptor *tx = NULL;
+    struct page *p, *q, *dq;
+    u8 coef;
+    enum async_tx_flags flags = submit->flags;
+    dma_async_tx_callback cb_fn = submit->cb_fn;
+    void *cb_param = submit->cb_param;
+    void *scribble = submit->scribble;
+    int good_srcs, good, i;
+    struct page *srcs[2];
 
-	/* if a dma resource is not available or a scribble buffer is not
-	 * available punt to the synchronous path.  In the 'dma not
-	 * available' case be sure to use the scribble buffer to
-	 * preserve the content of 'blocks' as the caller intended.
-	 */
-	if (!async_dma_find_channel(DMA_PQ) || !scribble) {
-		void **ptrs = scribble ? scribble : (void **) blocks;
+    /* if a dma resource is not available or a scribble buffer is not
+     * available punt to the synchronous path.  In the 'dma not
+     * available' case be sure to use the scribble buffer to
+     * preserve the content of 'blocks' as the caller intended.
+     */
+    if (!async_dma_find_channel(DMA_PQ) || !scribble) {
+	void **ptrs = scribble ? scribble : (void **) blocks;
 
-		async_tx_quiesce(&submit->depend_tx);
-		for (i = 0; i < disks; i++)
-			if (blocks[i] == NULL)
-				ptrs[i] = (void*)raid6_empty_zero_page;
-			else
-				ptrs[i] = page_address(blocks[i]);
+	async_tx_quiesce(&submit->depend_tx);
+	for (i = 0; i < disks; i++)
+	    if (blocks[i] == NULL)
+		ptrs[i] = (void*)raid6_empty_zero_page;
+	    else
+		ptrs[i] = page_address(blocks[i]);
 
-		raid6_datap_recov(disks, bytes, faila, ptrs);
+	raid6_datap_recov(disks, bytes, faila, ptrs);
 
-		async_tx_sync_epilog(submit);
+	async_tx_sync_epilog(submit);
 
-		return NULL;
+	return NULL;
+    }
+
+    good_srcs = 0;
+    good = -1;
+    for (i = 0; i < disks-2; i++) {
+	if (i == faila)
+	    continue;
+	if (blocks[i]) {
+	    good = i;
+	    good_srcs++;
+	    if (good_srcs > 1)
+		break;
 	}
+    }
+    BUG_ON(good_srcs == 0);
 
-	good_srcs = 0;
-	good = -1;
-	for (i = 0; i < disks-2; i++) {
-		if (i == faila)
-			continue;
-		if (blocks[i]) {
-			good = i;
-			good_srcs++;
-			if (good_srcs > 1)
-				break;
-		}
-	}
-	BUG_ON(good_srcs == 0);
+    p = blocks[disks-2];
+    q = blocks[disks-1];
 
-	p = blocks[disks-2];
-	q = blocks[disks-1];
+    /* Compute syndrome with zero for the missing data page
+     * Use the dead data page as temporary storage for delta q
+     */
+    dq = blocks[faila];
+    blocks[faila] = NULL;
+    blocks[disks-1] = dq;
 
-	/* Compute syndrome with zero for the missing data page
-	 * Use the dead data page as temporary storage for delta q
-	 */
-	dq = blocks[faila];
-	blocks[faila] = NULL;
-	blocks[disks-1] = dq;
+    /* in the 4-disk case we only need to perform a single source
+     * multiplication with the one good data block.
+     */
+    if (good_srcs == 1) {
+	struct page *g = blocks[good];
 
-	/* in the 4-disk case we only need to perform a single source
-	 * multiplication with the one good data block.
-	 */
-	if (good_srcs == 1) {
-		struct page *g = blocks[good];
+	init_async_submit(submit, ASYNC_TX_FENCE, tx, NULL, NULL,
+			  scribble);
+	tx = async_memcpy(p, g, 0, 0, bytes, submit);
 
-		init_async_submit(submit, ASYNC_TX_FENCE, tx, NULL, NULL,
-				  scribble);
-		tx = async_memcpy(p, g, 0, 0, bytes, submit);
+	init_async_submit(submit, ASYNC_TX_FENCE, tx, NULL, NULL,
+			  scribble);
+	tx = async_mult(dq, g, raid6_gfexp[good], bytes, submit);
+    } else {
+	init_async_submit(submit, ASYNC_TX_FENCE, tx, NULL, NULL,
+			  scribble);
+	tx = async_gen_syndrome(blocks, 0, disks, bytes, submit);
+    }
 
-		init_async_submit(submit, ASYNC_TX_FENCE, tx, NULL, NULL,
-				  scribble);
-		tx = async_mult(dq, g, raid6_gfexp[good], bytes, submit);
-	} else {
-		init_async_submit(submit, ASYNC_TX_FENCE, tx, NULL, NULL,
-				  scribble);
-		tx = async_gen_syndrome(blocks, 0, disks, bytes, submit);
-	}
+    /* Restore pointer table */
+    blocks[faila]   = dq;
+    blocks[disks-1] = q;
 
-	/* Restore pointer table */
-	blocks[faila]   = dq;
-	blocks[disks-1] = q;
+    /* calculate g^{-faila} */
+    coef = raid6_gfinv[raid6_gfexp[faila]];
 
-	/* calculate g^{-faila} */
-	coef = raid6_gfinv[raid6_gfexp[faila]];
+    srcs[0] = dq;
+    srcs[1] = q;
+    init_async_submit(submit, ASYNC_TX_FENCE|ASYNC_TX_XOR_DROP_DST, tx,
+		      NULL, NULL, scribble);
+    tx = async_xor(dq, srcs, 0, 2, bytes, submit);
 
-	srcs[0] = dq;
-	srcs[1] = q;
-	init_async_submit(submit, ASYNC_TX_FENCE|ASYNC_TX_XOR_DROP_DST, tx,
-			  NULL, NULL, scribble);
-	tx = async_xor(dq, srcs, 0, 2, bytes, submit);
+    init_async_submit(submit, ASYNC_TX_FENCE, tx, NULL, NULL, scribble);
+    tx = async_mult(dq, dq, coef, bytes, submit);
 
-	init_async_submit(submit, ASYNC_TX_FENCE, tx, NULL, NULL, scribble);
-	tx = async_mult(dq, dq, coef, bytes, submit);
+    srcs[0] = p;
+    srcs[1] = dq;
+    init_async_submit(submit, flags | ASYNC_TX_XOR_DROP_DST, tx, cb_fn,
+		      cb_param, scribble);
+    tx = async_xor(p, srcs, 0, 2, bytes, submit);
 
-	srcs[0] = p;
-	srcs[1] = dq;
-	init_async_submit(submit, flags | ASYNC_TX_XOR_DROP_DST, tx, cb_fn,
-			  cb_param, scribble);
-	tx = async_xor(p, srcs, 0, 2, bytes, submit);
-
-	return tx;
+    return tx;
 }
 EXPORT_SYMBOL_GPL(async_raid6_datap_recov);
 

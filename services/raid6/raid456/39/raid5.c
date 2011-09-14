@@ -961,17 +961,37 @@ ops_run_compute6_2(struct stripe_head *sh, struct raid5_percpu *percpu)
 		} else {
 			/* We're missing D+D. */
 			// something dangerous, we assume no ASYN_PQ available!
-			struct page **pgs = kmalloc(sizeof(struct page*)*syndrome_disks+2,
-							GFP_KERNEL);							
+		        int usekmalloc = 1;
 			struct dma_async_tx_descriptor *desc;
-			
-			for(i=0; i<syndrome_disks+2; i++)
-				pgs[i] = blocks[i];
+			struct page **pgs = kmalloc(
+				sizeof(struct page*)*(syndrome_disks+2),
+				GFP_KERNEL);
+			if (!pgs) {
+				pgs = vmalloc(
+					sizeof(struct page*)*(syndrome_disks+2));
+				if (!pgs) {
+					printk("[raid456] Alert: out of mem "
+					       "for storing pointers @ "
+					       "%s:%d %s\n", __FILE__, __LINE__,
+						__func__);
+				}
+				usekmalloc = 0;
+			}
+			    
+			if (pgs)
+				for(i=0; i<syndrome_disks+2; i++)
+					pgs[i] = blocks[i];
 			
 			desc = async_raid6_2data_recov(syndrome_disks+2,
 						       STRIPE_SIZE, faila, failb,
-						       pgs, &submit);
-			kfree(pgs);
+						       pgs?pgs:blocks,
+						       &submit);
+			if (pgs) {
+				if (usekmalloc)
+					kfree(pgs);
+				else
+					vfree(pgs);
+			}
 			return desc;
 		}
 	}

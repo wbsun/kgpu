@@ -367,21 +367,25 @@ struct r62_data {
 static struct kmem_cache *r62_request_cache;
 static struct r62_data r62dat;
 
-static int r62_max_reqs = 8;
+static int r62_max_reqs = 32;
 module_param(r62_max_reqs, int, 0444);
-MODULE_PARM_DESC(r62_max_reqs, "max request queue size before procssing, default 8");
+MODULE_PARM_DESC(r62_max_reqs,
+		 "max request queue size before procssing, default 32");
 
 static int use_cpu = 0;
 module_param(use_cpu, int, 0444);
-MODULE_PARM_DESC(use_cpu, "use cpu 2data recovery, default 0 (No)");
+MODULE_PARM_DESC(use_cpu,
+		 "use cpu 2data recovery, default 0 (No)");
 
 static int use_sim = 0;
 module_param(use_sim, int, 0444);
-MODULE_PARM_DESC(use_cpu, "use cpu simulation for GPU call, default 0 (No)");
+MODULE_PARM_DESC(use_cpu,
+		 "use cpu simulation for GPU call, default 0 (No)");
 
 static int batch_timeout = 10;
 module_param(batch_timeout, int, 0444);
-MODULE_PARM_DESC(batch_timeout, "timeout for batching requests, default 10, in jiffies");
+MODULE_PARM_DESC(batch_timeout,
+		 "timeout for batching requests, default 10, in jiffies");
 
 
 #define do_log(level, ...) kgpu_do_log(level, "r62_recov", ##__VA_ARGS__)

@@ -724,7 +724,10 @@ async_raid6_2data_recov(int disks, size_t bytes, int faila, int failb,
 	async_tx_quiesce(&submit->depend_tx);
 
 	if (!use_cpu && bytes == PAGE_SIZE) {
-	    u8 **ptrs = kmalloc(sizeof(u8*)*disks, GFP_KERNEL);
+	    // With our patch for raid5.c, blocks already on new allocated
+	    // bufs. so we don't need re-aclloc new one.
+	    //u8 **ptrs = kmalloc(sizeof(u8*)*disks, GFP_KERNEL);
+	    u8 **ptrs = (u8**)blocks;
 			    
 	    for (i = 0; i < disks; i++)
 		if (blocks[i] == NULL)
@@ -739,7 +742,7 @@ async_raid6_2data_recov(int disks, size_t bytes, int faila, int failb,
 				    faila,
 				    failb,
 				    ptrs);
-	    kfree(ptrs);
+	    //kfree(ptrs);
 	} else {	    
 	    void **ptrs = scribble ? scribble : (void **) blocks;
 		

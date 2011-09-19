@@ -99,6 +99,8 @@
 
 #define printk_rl(args...) ((void) (printk_ratelimit() && printk(args)))
 
+static int force_n = 0;
+
 /*
  * We maintain a biased count of active stripes in the bottom 16 bits of
  * bi_phys_segments, and a count of processed stripes in the upper 16 bits
@@ -1833,6 +1835,8 @@ static sector_t raid5_compute_sector(raid5_conf_t *conf, sector_t r_sector,
 
 		switch (algorithm) {
 		case ALGORITHM_LEFT_ASYMMETRIC:
+			if (force_n)
+				goto use_n;
 			pd_idx = raid_disks - 1 - sector_div(stripe2, raid_disks);
 			qd_idx = pd_idx + 1;
 			if (pd_idx == raid_disks-1) {
@@ -1867,6 +1871,7 @@ static sector_t raid5_compute_sector(raid5_conf_t *conf, sector_t r_sector,
 			(*dd_idx) += 2;
 			break;
 		case ALGORITHM_PARITY_N:
+		use_n:
 			pd_idx = data_disks;
 			qd_idx = data_disks + 1;
 			break;
@@ -1911,6 +1916,8 @@ static sector_t raid5_compute_sector(raid5_conf_t *conf, sector_t r_sector,
 
 		case ALGORITHM_LEFT_ASYMMETRIC_6:
 			/* RAID5 left_asymmetric, with Q on last device */
+			if (force_n)
+				goto use_n;
 			pd_idx = data_disks - sector_div(stripe2, raid_disks-1);
 			if (*dd_idx >= pd_idx)
 				(*dd_idx)++;
@@ -2013,6 +2020,8 @@ static sector_t compute_blocknr(struct stripe_head *sh, int i, int previous)
 			return 0; /* It is the Q disk */
 		switch (algorithm) {
 		case ALGORITHM_LEFT_ASYMMETRIC:
+			if (force_n)
+				goto become_n;
 		case ALGORITHM_RIGHT_ASYMMETRIC:
 		case ALGORITHM_ROTATING_ZERO_RESTART:
 		case ALGORITHM_ROTATING_N_RESTART:
@@ -2036,6 +2045,7 @@ static sector_t compute_blocknr(struct stripe_head *sh, int i, int previous)
 			i -= 2;
 			break;
 		case ALGORITHM_PARITY_N:
+		become_n:
 			break;
 		case ALGORITHM_ROTATING_N_CONTINUE:
 			/* Like left_symmetric, but P is before Q */
@@ -2049,6 +2059,8 @@ static sector_t compute_blocknr(struct stripe_head *sh, int i, int previous)
 			}
 			break;
 		case ALGORITHM_LEFT_ASYMMETRIC_6:
+			if (force_n)
+				goto become_n;
 		case ALGORITHM_RIGHT_ASYMMETRIC_6:
 			if (i > sh->pd_idx)
 				i--;
@@ -4948,6 +4960,7 @@ static int only_parity(int raid_disk, int algo, int raid_disks, int max_degraded
 			return 1;
 		break;
 	case ALGORITHM_PARITY_N:
+	tobe_n:
 		if (raid_disk >= raid_disks - max_degraded)
 			return 1;
 		break;
@@ -4957,6 +4970,8 @@ static int only_parity(int raid_disk, int algo, int raid_disks, int max_degraded
 			return 1;
 		break;
 	case ALGORITHM_LEFT_ASYMMETRIC_6:
+		if (force_n)
+			goto tobe_n;
 	case ALGORITHM_RIGHT_ASYMMETRIC_6:
 	case ALGORITHM_LEFT_SYMMETRIC_6:
 	case ALGORITHM_RIGHT_SYMMETRIC_6:
@@ -6010,6 +6025,11 @@ static struct mdk_personality raid4_personality =
 	.quiesce	= raid5_quiesce,
 	.takeover	= raid4_takeover,
 };
+
+//static int force_n = 0;
+module_param(force_n, int, 0444);
+MODULE_PARM_DESC(force_n,
+		 "use Parity_N layout, default 0 (No)");
 
 static int __init raid5_init(void)
 {

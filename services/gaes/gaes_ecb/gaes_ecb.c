@@ -48,10 +48,10 @@ static int zero_copy=0;
 module_param(zero_copy, int, 0444);
 MODULE_PARM_DESC(zero_copy, "use GPU mem zero-copy, default 0 (No)");
 
-static int async_threshold=256;
+static int split_threshold=256;
 
-module_param(async_threshold, int, 0444);
-MODULE_PARM_DESC(async_threshold, "size(#pages) threshold for async call, default 256");
+module_param(split_threshold, int, 0444);
+MODULE_PARM_DESC(split_threshold, "size(#pages) threshold for split, default 256");
 
 static int
 crypto_gaes_ecb_setkey(
@@ -348,9 +348,9 @@ static int crypto_ecb_gpu_crypt(
     unsigned int nbytes, int enc)
 {
     if ((nbytes>>PAGE_SHIFT)
-	>= (async_threshold+(async_threshold>>1))) {
+	>= (split_threshold+(split_threshold>>1))) {
 	unsigned int remainings = nbytes;
-	int nparts = nbytes/(async_threshold<<(PAGE_SHIFT-1));
+	int nparts = nbytes/(split_threshold<<(PAGE_SHIFT-1));
 	struct completion *cs;
 	int i;
 	int ret = 0;
@@ -367,18 +367,18 @@ static int crypto_ecb_gpu_crypt(
 		if (zero_copy)
 		    ret = crypto_gaes_ecb_crypt_zc(desc, dst, src,
 						   (i==nparts-1)?remainings:
-						   async_threshold<<PAGE_SHIFT,
-						   enc, cs+i, i*(async_threshold<<PAGE_SHIFT));
+						   split_threshold<<PAGE_SHIFT,
+						   enc, cs+i, i*(split_threshold<<PAGE_SHIFT));
 		else
 		    ret = crypto_gaes_ecb_crypt(desc, dst, src,
 						(i==nparts-1)?remainings:
-						async_threshold<<PAGE_SHIFT,
-						enc, cs+i, i*(async_threshold<<PAGE_SHIFT));
+						split_threshold<<PAGE_SHIFT,
+						enc, cs+i, i*(split_threshold<<PAGE_SHIFT));
 
 		if (ret < 0)
 		    break;
 		
-		remainings -= (async_threshold<<PAGE_SHIFT);
+		remainings -= (split_threshold<<PAGE_SHIFT);
 	    }
 
 	    for (i--; i>=0; i--)
@@ -566,11 +566,11 @@ EXPORT_SYMBOL_GPL(test_gaes_ecb);
 
 static int __init crypto_gaes_ecb_module_init(void)
 {
-    if (!async_threshold) {
+    if (!split_threshold) {
 	g_log(KGPU_LOG_ERROR,
-	      "incorrect async_threshold parameter %u\n",
-	      async_threshold);
-	async_threshold = 1;
+	      "incorrect split_threshold parameter %u\n",
+	      split_threshold);
+	split_threshold = 1;
     }
     return crypto_register_template(&crypto_gaes_ecb_tmpl);
 }

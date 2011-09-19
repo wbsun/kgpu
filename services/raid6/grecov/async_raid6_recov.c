@@ -370,7 +370,14 @@ static struct r62_data r62dat;
 static int r62_max_reqs = 32;
 module_param(r62_max_reqs, int, 0444);
 MODULE_PARM_DESC(r62_max_reqs,
-		 "max request queue size before procssing, default 32");
+		 "max request queue size before procssing, default 32 "
+		 "(alias of merge_number)");
+
+static int merge_number = 32;
+module_param(merge_number, int, 0444);
+MODULE_PARM_DESC(merge_number,
+		 "max request queue size before procssing, default 32 "
+		 "(alias of r62_max_reqs)");
 
 static int use_cpu = 0;
 module_param(use_cpu, int, 0444);
@@ -387,10 +394,17 @@ module_param(batch_timeout, int, 0444);
 MODULE_PARM_DESC(batch_timeout,
 		 "timeout for batching requests, default 10, in jiffies");
 
+static int test = 0;
+module_param(test, int, 0444);
+MODULE_PARM_DESC(test,
+		 "test performance when loading, default 0 (No)");
+
 
 #define do_log(level, ...) kgpu_do_log(level, "r62_recov", ##__VA_ARGS__)
 #define prnt(...) 
 //do_log(KGPU_LOG_PRINT, ##__VA_ARGS__)
+
+static void do_test(void);
 
 static void r62_request_ctr(void *data)
 {
@@ -685,7 +699,11 @@ static void gpu_async_raid6_2drecov(int disks, size_t bytes,
 
 static int __init r62_recov_module_init(void)
 {
+    if (merge_number != 32)
+	merge_number = r62_max_reqs;
     init_gpu_system();
+    if (test)
+	do_test();
     return 0;
 }
 
@@ -797,6 +815,135 @@ async_raid6_2data_recov(int disks, size_t bytes, int faila, int failb,
     }
 }
 EXPORT_SYMBOL_GPL(async_raid6_2data_recov);
+
+#include <linux/async.h>
+
+static int test_min_size = 1;
+static int test_max_size = 1;
+static int test_min_disks = 6;
+static int test_max_disks = 8;
+
+struct async_data {
+    struct completion *c;
+    void **pts;
+    int disks;
+};
+
+void async_gpu(void *param, async_cookie_t cookie)
+{
+    struct async_data *d = (struct async_data*)param;
+    gpu_async_raid6_2drecov(d->disks, PAGE_SIZE, 0, 1, (u8**)d->pts);
+    complete(d->c);
+}
+
+void async_cpu(void *param, async_cookie_t cookie)
+{
+    struct async_data *d = (struct async_data*)param;
+    raid6_2data_recov(d->disks, PAGE_SIZE, 0, 1, d->pts);
+    complete(d->c);
+}
+
+static void do_test(void)
+{
+    int old_use_cpu = use_cpu;
+    int old_use_sim = use_sim;
+
+    int disks, size, i;
+
+    struct timeval t0, t1;
+    long t;
+
+    struct async_data *ds = kmalloc(
+	sizeof(struct async_data)*test_max_size, GFP_KERNEL);
+
+    void **pgs = kmalloc(
+	sizeof(void)*(test_max_disks*test_max_size), GFP_KERNEL|__GFP_ZERO);
+    struct completion *cs = kmalloc(
+	sizeof(struct completion)*test_max_size, GFP_KERNEL);
+    if (!pgs) { do_log(KGPU_LOG_ERROR, "pgs no mem\n"); goto clean_out;}
+    if (!cs) { do_log(KGPU_LOG_ERROR, "cs no mem\n"); goto clean_out;}
+    if (!ds) { do_log(KGPU_LOG_ERROR, "ds no mem\n"); goto clean_out;}
+
+    for (i=0; i<test_max_disks*test_max_size; i++) {
+	pgs[i] = __get_free_page(GFP_KERNEL);
+	if (!pgs[i]) {
+	    do_log(KGPU_LOG_ERROR, "no page\n"); goto clean_out;
+	}
+    }
+
+    printk("begin test\n");
+
+    for (size = test_min_size; size <= test_max_size; size += test_min_size)
+    {
+	for (disks = test_min_disks; disks <= test_max_disks; disks += 2)
+	{
+	    printk("test %d %d\n", size, disks);
+	    for (i=0; i<size; i++) {
+		init_completion(cs+i);
+	    }
+
+	    //do_log(KGPU_LOG_PRINT, "do GPU test ...\n");
+
+	    use_cpu = 0;
+	    use_sim = 0;
+	    do_gettimeofday(&t0);
+	    for (i=0; i<size; i++) {
+		ds[i].disks = disks;
+		ds[i].c = cs+i;
+		ds[i].pts = pgs+i*disks;
+
+		//	async_schedule(async_gpu, ds);
+	    }
+	    //for (i=0; i<size; i++)
+	    //	wait_for_completion(cs+i);
+	    do_gettimeofday(&t1);
+
+	    t = 1000000*(t1.tv_sec-t0.tv_sec) +
+		((int)(t1.tv_usec) - (int)(t0.tv_usec));
+	    printk("GPU %2d disks, %4d reqs, %8ldMB/s, %8ldus\n",
+		   disks, size, (size*PAGE_SIZE*(disks-2))/t, t);
+
+	    /* ----------- */
+	    for (i=0; i<size; i++) {
+		init_completion(cs+i);
+	    }
+	    //do_log(KGPU_LOG_PRINT, "do CPU test ...\n");
+
+	    use_cpu = 1;
+	    use_sim = 0;
+	    do_gettimeofday(&t0);
+	    for (i=0; i<size; i++) {
+		ds[i].disks = disks;
+		ds[i].c = cs+i;
+		ds[i].pts = pgs+i*disks;
+
+		async_schedule(async_cpu, ds);
+	    }	
+	    for (i=0; i<size; i++)
+		wait_for_completion(cs+i);
+	    do_gettimeofday(&t1);
+
+	    t = 1000000*(t1.tv_sec-t0.tv_sec) +
+		((int)(t1.tv_usec) - (int)(t0.tv_usec));
+	    printk("CPU %2d disks, %4d reqs, %8ldMB/s, %8ldus\n",
+		   disks, size, (size*PAGE_SIZE*(disks-2))/t, t);    
+	}
+    }
+
+
+clean_out:
+    if (pgs) {
+	for (i=0; i<test_max_disks*test_max_size; i++) {
+	    if (pgs[i]) free_page(pgs[i]);
+	}
+	kfree(pgs);
+    }
+    if (cs) kfree(cs);
+    if (ds) kfree(ds);
+
+    use_cpu = old_use_cpu;
+    use_sim = old_use_sim;      
+}
 
 /**
  * async_raid6_datap_recov - asynchronously calculate a data and the 'p' block

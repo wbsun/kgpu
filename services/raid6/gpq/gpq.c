@@ -165,14 +165,14 @@ static void gpu_gen_syndrome(
     }    
 }
 
-#define NSTREAMS 8
+#define SPLIT_NR 8
 
 static void* __multi_gpu_gen_syndrome(
     int disks, size_t dsize, void **dps, struct completion cs[], int async)
 {
     void *ret = NULL;
     
-    if ((dsize%(NSTREAMS*PAGE_SIZE)) != 0) {
+    if ((dsize%(SPLIT_NR*PAGE_SIZE)) != 0) {
 	if (async) {
 	single_thread_async:
 	    init_completion(&cs[0]);
@@ -183,9 +183,9 @@ static void* __multi_gpu_gen_syndrome(
     } else {
 	int i, j;
 	void **ps;
-	size_t tsksz = dsize/NSTREAMS;
+	size_t tsksz = dsize/SPLIT_NR;
 
-	ps = kmalloc(sizeof(void*)*NSTREAMS*disks, GFP_KERNEL);
+	ps = kmalloc(sizeof(void*)*SPLIT_NR*disks, GFP_KERNEL);
 	if (!ps) {
 	    gpq_log(KGPU_LOG_ERROR, "out of memory for dps\n");
 	    if (async) {
@@ -194,12 +194,12 @@ static void* __multi_gpu_gen_syndrome(
 		gpu_gen_syndrome(disks, dsize, dps, NULL);
 	    }
 	} else {
-	    for (i=0; i<NSTREAMS; i++) {
+	    for (i=0; i<SPLIT_NR; i++) {
 		for (j=0; j<disks; j++) {
-		    ps[i*NSTREAMS+j] = ((char*)(dps[j]))+tsksz*i;
+		    ps[i*SPLIT_NR+j] = ((char*)(dps[j]))+tsksz*i;
 		}
 		init_completion(cs+i);
-		gpu_gen_syndrome(disks, tsksz, ps+i*NSTREAMS, cs+i);
+		gpu_gen_syndrome(disks, tsksz, ps+i*SPLIT_NR, cs+i);
 	    }
 
 	    ret = (void*)ps;
@@ -211,12 +211,12 @@ static void* __multi_gpu_gen_syndrome(
 
 static void multi_gpu_gen_syndrome(int disks, size_t dsize, void **dps)
 {
-    struct completion cs[NSTREAMS];
+    struct completion cs[SPLIT_NR];
     int i;
     void *p =
 	__multi_gpu_gen_syndrome(disks, dsize, dps, cs, 0);
     if (p) {
-	for (i=0; i<NSTREAMS; i++) {
+	for (i=0; i<SPLIT_NR; i++) {
 	    wait_for_completion_interruptible(cs+i);
 	}
 	
@@ -239,7 +239,7 @@ static void gpq_gen_syndrome(int disks, size_t dsize, void **dps)
 	} else {	    
 	    void *cdps[MAX_DISKS];
 	    int i;
-	    struct completion cs[NSTREAMS];
+	    struct completion cs[SPLIT_NR];
 	    void *p;
 	    size_t csize = dsize-gpuload;
 		
@@ -255,7 +255,7 @@ static void gpq_gen_syndrome(int disks, size_t dsize, void **dps)
 	    }
 
 	    if (p) {
-		for (i=0; i<NSTREAMS; i++) {
+		for (i=0; i<SPLIT_NR; i++) {
 		    wait_for_completion_interruptible(cs+i);
 		}
 		kfree(p);

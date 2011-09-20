@@ -572,11 +572,13 @@ static int __init crypto_gaes_ecb_module_init(void)
 	      split_threshold);
 	split_threshold = 1;
     }
+    g_log(KGPU_LOG_PRINT, "module load\n");
     return crypto_register_template(&crypto_gaes_ecb_tmpl);
 }
 
 static void __exit crypto_gaes_ecb_module_exit(void)
 {
+    g_log(KGPU_LOG_PRINT, "module unload\n");
     crypto_unregister_template(&crypto_gaes_ecb_tmpl);
 }
 

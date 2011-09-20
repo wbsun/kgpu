@@ -509,11 +509,13 @@ static int __init crypto_ctr_module_init(void)
 
     err = crypto_register_template(&crypto_ctr_tmpl);
     err |= crypto_register_template(&crypto_lctr_tmpl);
+    g_log(KGPU_LOG_PRINT, "module load\n");
     return err;
 }
 
 static void __exit crypto_ctr_module_exit(void)
 {
+    g_log(KGPU_LOG_PRINT, "module unload\n");
     crypto_unregister_template(&crypto_lctr_tmpl);
     crypto_unregister_template(&crypto_ctr_tmpl);
 }

@@ -1,4 +1,4 @@
-SUBDIRS = callaes ecryptfs gaes_ctr libsrv_gaes dm-crypt gaes_ecb
+SUBDIRS = callaes ecryptfs gaes_ctr libsrv_gaes dm-crypt gaes_ecb gaes_xts
 
 all: $(SUBDIRS)
 

@@ -18,12 +18,13 @@
 #include <linux/jiffies.h>
 #include <linux/timex.h>
 
+
 char* AES_GENERIC = "ecb(aes-generic)";
-char* AES_ASM = "ecb(aes-asm)";
+char* AES_ASM = "xts(aes-asm)";
 char* AES = "ecb(aes)";
 
 char* AES_GPU_GENERIC = "gaes_ecb(aes-generic)";
-char* AES_GPU_ASM = "gaes_ecb(aes-asm)";
+char* AES_GPU_ASM = "gaes_xts(aes-asm)";
 char* AES_GPU = "gaes_ecb(aes)";
 
 char* CIPHER;
@@ -32,6 +33,8 @@ char* CIPHER;
 #define MIN_BLK_SIZE (4*1024)
 
 #define TEST_TIMES 10
+
+int test_gpu = 0;
 
 #if 0
 
@@ -74,7 +77,8 @@ void test_aes(void)
 	
 	unsigned int ret;
 	
-	u8 key[] = {0x00, 0x01, 0x02, 0x03, 0x05, 0x06, 0x07, 0x08, 0x0A, 0x0B, 0x0C, 0x0D, 0x0F, 0x10, 0x11, 0x12};
+	u8 key[] = {0x00, 0x01, 0x02, 0x03, 0x05, 0x06, 0x07, 0x08, 0x0A, 0x0B, 0x0C, 0x0D, 0x0F, 0x10, 0x11, 0x12,
+	0x00, 0x01, 0x02, 0x03, 0x05, 0x06, 0x07, 0x08, 0x0A, 0x0B, 0x0C, 0x0D, 0x0F, 0x10, 0x11, 0x12};
 	
 	npages = MAX_BLK_SIZE/PAGE_SIZE;
 
@@ -121,11 +125,14 @@ void test_aes(void)
 	desc.tfm = tfm;
 	desc.flags = 0;
 	desc.info = iv;
-	
-	ret = crypto_blkcipher_setkey(tfm, key, sizeof(key));
+
+	if (test_gpu)
+		ret = crypto_blkcipher_setkey(tfm, key, 32);
+	else
+		ret = crypto_blkcipher_setkey(tfm, key, 32);
 	if (ret) {
-		printk("setkey() failed flags=%x\n",
-				crypto_blkcipher_get_flags(tfm));
+		printk("setkey() failed flags=%x %lu\n",
+				crypto_blkcipher_get_flags(tfm), sizeof(key));
 	 	goto out;
 	}
 	
@@ -201,12 +208,14 @@ static int __init taes_init(void)
 {
 	printk("test gaes loaded\n");
 	CIPHER = AES_GPU_ASM;
+	test_gpu = 1;
 	test_aes();
 	/* CIPHER = AES_GPU; */
 	/* test_aes(); */
 	/* CIPHER = AES_GPU; */
 	/* test_aes(); */
 	CIPHER = AES_ASM;
+	test_gpu = 0;
 	test_aes();
 	/* CIPHER = AES; */
 	/* test_aes(); */

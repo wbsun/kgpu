@@ -2,6 +2,8 @@
 
 insmod ./kgpu.ko &&
 modprobe aes &&
+modprobe xts &&
 insmod ./gaes_ecb.ko &&
 insmod ./gaes_ctr.ko &&
+insmod ./gaes_xts.ko &&
 ./helper -l `pwd`

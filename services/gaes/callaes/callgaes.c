@@ -20,11 +20,11 @@
 
 
 char* AES_GENERIC = "ecb(aes-generic)";
-char* AES_ASM = "xts(aes-asm)";
+char* AES_ASM = "ecb(aes-asm)";
 char* AES = "ecb(aes)";
 
 char* AES_GPU_GENERIC = "gaes_ecb(aes-generic)";
-char* AES_GPU_ASM = "gaes_xts(aes-asm)";
+char* AES_GPU_ASM = "gaes_ecb(aes-asm)";
 char* AES_GPU = "gaes_ecb(aes)";
 
 char* CIPHER;
@@ -35,6 +35,12 @@ char* CIPHER;
 #define TEST_TIMES 10
 
 int test_gpu = 0;
+
+static int skip_cpu=0;
+
+module_param(skip_cpu, int, 0444);
+MODULE_PARM_DESC(skip_cpu, "do not test CPU cipher, default 0 (No)");
+
 
 #if 0
 
@@ -127,9 +133,9 @@ void test_aes(void)
 	desc.info = iv;
 
 	if (test_gpu)
-		ret = crypto_blkcipher_setkey(tfm, key, 32);
+		ret = crypto_blkcipher_setkey(tfm, key, 16);
 	else
-		ret = crypto_blkcipher_setkey(tfm, key, 32);
+		ret = crypto_blkcipher_setkey(tfm, key, 16);
 	if (ret) {
 		printk("setkey() failed flags=%x %lu\n",
 				crypto_blkcipher_get_flags(tfm), sizeof(key));
@@ -183,8 +189,8 @@ void test_aes(void)
 		dec = 1000000*(t1.tv_sec-t0.tv_sec) + 
 			((int)(t1.tv_usec) - (int)(t0.tv_usec));
 
-		printk("%25s: Size %10u, enc BW: %6ldMB/s dec BW: %6ldMB/s\n",
-		       CIPHER, bs, (bs*TEST_TIMES)/enc, (bs*TEST_TIMES)/dec);
+		printk("%5s: Size %10u, enc BW: %6ld MB/s dec BW: %6ld MB/s\n",
+		       test_gpu?"GAES":"CAES", bs, (bs*TEST_TIMES)/enc, (bs*TEST_TIMES)/dec);
 	}
 	
 	
@@ -214,13 +220,15 @@ static int __init taes_init(void)
 	/* test_aes(); */
 	/* CIPHER = AES_GPU; */
 	/* test_aes(); */
-	CIPHER = AES_ASM;
+	/* CIPHER = AES_ASM; */
+	if (skip_cpu)
+		return 0;
 	test_gpu = 0;
+	/* test_aes(); */
+	/* CIPHER = AES; */
+	/* test_aes(); */
+	CIPHER = AES_GENERIC;
 	test_aes();
-	/* CIPHER = AES; */
-	/* test_aes(); */
-	/* CIPHER = AES; */
-	/* test_aes(); */
 	return 0;
 }
 

@@ -12,9 +12,9 @@
 
 #include "gaes_common.h"
 
-#define GAES_ECB_SIZE_THRESHOLD (PAGE_SIZE*2)
-#define GAES_CTR_SIZE_THRESHOLD (PAGE_SIZE*2)
-#define GAES_XTS_SIZE_THRESHOLD (PAGE_SIZE*2)
+#define GAES_ECB_SIZE_THRESHOLD (PAGE_SIZE-1)
+#define GAES_CTR_SIZE_THRESHOLD (PAGE_SIZE-1)
+#define GAES_XTS_SIZE_THRESHOLD (PAGE_SIZE-1)
 
 long test_gaes_ecb(size_t sz, int enc);
 long test_gaes_ctr(size_t sz);

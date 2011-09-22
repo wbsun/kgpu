@@ -44,14 +44,17 @@ struct gaes_ecb_async_data {
 };
 
 static int zero_copy=0;
-
 module_param(zero_copy, int, 0444);
 MODULE_PARM_DESC(zero_copy, "use GPU mem zero-copy, default 0 (No)");
 
-static int split_threshold=256;
-
+static int split_threshold=128;
 module_param(split_threshold, int, 0444);
-MODULE_PARM_DESC(split_threshold, "size(#pages) threshold for split, default 256");
+MODULE_PARM_DESC(split_threshold, "size(#pages) threshold for split, default 128");
+
+static int max_splits=8;
+module_param(max_splits, int, 0444);
+MODULE_PARM_DESC(max_splits, "max number of sub-requests a big one be split, default 8");
+
 
 static int
 crypto_gaes_ecb_setkey(
@@ -354,10 +357,16 @@ static int crypto_ecb_gpu_crypt(
 	struct completion *cs;
 	int i;
 	int ret = 0;
+	unsigned int partsz = split_threshold<<PAGE_SHIFT;
 
 	if (nparts & 0x1)
 	    nparts++;
 	nparts >>= 1;
+
+	if (nparts > max_splits) {
+	    nparts = max_splits;
+	    partsz = nbytes/nparts;
+	}
 
 	cs = (struct completion*)kmalloc(sizeof(struct completion)*nparts,
 					 GFP_KERNEL);
@@ -367,18 +376,18 @@ static int crypto_ecb_gpu_crypt(
 		if (zero_copy)
 		    ret = crypto_gaes_ecb_crypt_zc(desc, dst, src,
 						   (i==nparts-1)?remainings:
-						   split_threshold<<PAGE_SHIFT,
-						   enc, cs+i, i*(split_threshold<<PAGE_SHIFT));
+						   partsz,
+						   enc, cs+i, i*partsz);
 		else
 		    ret = crypto_gaes_ecb_crypt(desc, dst, src,
 						(i==nparts-1)?remainings:
-						split_threshold<<PAGE_SHIFT,
-						enc, cs+i, i*(split_threshold<<PAGE_SHIFT));
+						partsz,
+						enc, cs+i, i*partsz);
 
 		if (ret < 0)
 		    break;
 		
-		remainings -= (split_threshold<<PAGE_SHIFT);
+		remainings -= partsz;
 	    }
 
 	    for (i--; i>=0; i--)

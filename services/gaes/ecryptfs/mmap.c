@@ -87,7 +87,7 @@ out:
 	return rc;
 }
 
-#if 0
+#if 1
 /*
  * Inspired by write_cache_pages from /mm/page-writeback.c
  */
@@ -208,7 +208,7 @@ continue_unlock:
 
 		/*trace_wbc_writepage(wbc, mapping->backing_dev_info);*/
 		ret = ecryptfs_encrypt_pages(pgs, pgidx);
-		printk("[g-ecryptfs] Info: enc %d pages in writepages\n", pgidx);
+		//printk("[g-ecryptfs] Info: enc %d pages in writepages\n", pgidx);
 		mapping_set_error(mapping, ret);
 
 		for (i = 0; i < nr_pages; i++) {
@@ -855,6 +855,6 @@ const struct address_space_operations ecryptfs_aops = {
 	.readpages = ecryptfs_readpages,
 	.write_begin = ecryptfs_write_begin,
 	.write_end = ecryptfs_write_end,
-	/* .writepages = ecryptfs_writepages, */
+	.writepages = ecryptfs_writepages,
 	.bmap = ecryptfs_bmap,
 };

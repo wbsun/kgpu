@@ -326,14 +326,16 @@ static long test_recov_2data(int disks, size_t dsize)
     struct timeval t0, t1;
     long t;
     int i;
-    void **dps = vmalloc(sizeof(void*)*disks); //kmalloc(sizeof(void*)*disks, GFP_KERNEL);
-    char *data = vmalloc(disks*dsize); //kmalloc(disks*dsize, GFP_KERNEL);
+    /* void **dps = vmalloc(sizeof(void*)*disks); */
+    void **dps = kmalloc(sizeof(void*)*disks, GFP_KERNEL);
+    /* char *data = vmalloc(disks*dsize); */
+    char *data = kmalloc(disks*dsize, GFP_KERNEL);
 
     if (!data || !dps) {
 	gpq_log(KGPU_LOG_ERROR,
 		"out of memory for RAID6 recov test\n");
-	if (dps) vfree(dps);
-	if (data) vfree(data);
+	if (dps) kfree(dps);
+	if (data) kfree(data);
 	return 0;
     }
 
@@ -348,15 +350,15 @@ static long test_recov_2data(int disks, size_t dsize)
     t = 1000000*(t1.tv_sec-t0.tv_sec) +
 	((int)(t1.tv_usec) - (int)(t0.tv_usec));
 
-    vfree(dps);
-    vfree(data);
+    kfree(dps);
+    kfree(data);
 
     return t;
 }
 
-#define TEST_NDISKS 16
+#define TEST_NDISKS 8
 #define MIN_DSZ (1024*4)
-#define MAX_DSZ (32*1024)
+#define MAX_DSZ (256*1024)
 #define TEST_TIMES_SHIFT 4
 #define TEST_TIMES (1<<TEST_TIMES_SHIFT)
 
@@ -379,7 +381,7 @@ static void do_benchmark(void)
     test_gpq(TEST_NDISKS, PAGE_SIZE);
     gpq_log(KGPU_LOG_PRINT, "init CUDA done\n");
 
-    t = 0;
+    /*t = 0;
     for (i=0; i<TEST_TIMES; i++)
 	t+=test_recov_2data(TEST_NDISKS, PAGE_SIZE);
     t>>= TEST_TIMES_SHIFT;
@@ -387,7 +389,7 @@ static void do_benchmark(void)
 	    "md recovery PAGE_SIZE*%d disks %8luMB/s %8luMB/s %8luus\n",
 	    TEST_NDISKS, (PAGE_SIZE*(TEST_NDISKS-2))/t, (PAGE_SIZE*2)/t,
 	    t);
-
+    */
     for (sz = MIN_DSZ; sz <= MAX_DSZ; sz += MIN_DSZ)
     {
 	size_t tsz = sz*(TEST_NDISKS-2);
@@ -408,7 +410,7 @@ static void do_benchmark(void)
 
 	//for (rc = raid6_algos; *rc; rc++) {
 	//    if (!(*rc)->valid || (*rc)->valid()) {
-		t=0;
+	/*	t=0;
 		for (i=0; i<TEST_TIMES; i++) {
 		    t += test_pq(TEST_NDISKS, sz, *rc);		
 		}
@@ -420,7 +422,7 @@ static void do_benchmark(void)
 			tsz>>10,
 			(*rc)->name,
 			tsz/t
-		    );
+			);*/
 		//   }
 		//}
     }

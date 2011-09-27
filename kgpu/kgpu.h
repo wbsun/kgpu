@@ -54,7 +54,7 @@ struct kgpu_ku_response {
 
 /* the NR will not be used */
 #define KGPU_BUF_NR 1
-#define KGPU_BUF_SIZE (512*1024*1024)
+#define KGPU_BUF_SIZE (1024*1024*1024)
 
 #define KGPU_MMAP_SIZE KGPU_BUF_SIZE
 

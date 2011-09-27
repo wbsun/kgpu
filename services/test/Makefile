@@ -1,4 +1,4 @@
-SUBDIRS = calg2 callgpu libsrv_test
+SUBDIRS = calg2 callgpu libsrv_test sysbm
 
 all: $(SUBDIRS)
 

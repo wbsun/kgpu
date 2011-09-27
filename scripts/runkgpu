@@ -3,7 +3,7 @@
 insmod ./kgpu.ko &&
 modprobe aes &&
 modprobe xts &&
-insmod ./gaes_ecb.ko &&
+insmod ./gaes_ecb.ko zero_copy=0 split_threshold=32 max_splits=8 &&
 insmod ./gaes_ctr.ko &&
 insmod ./gaes_xts.ko &&
 ./helper -l `pwd`

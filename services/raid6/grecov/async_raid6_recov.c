@@ -367,17 +367,15 @@ struct r62_data {
 static struct kmem_cache *r62_request_cache;
 static struct r62_data r62dat;
 
-static int r62_max_reqs = 32;
+static int r62_max_reqs = 16;
 module_param(r62_max_reqs, int, 0444);
 MODULE_PARM_DESC(r62_max_reqs,
-		 "max request queue size before procssing, default 32 "
-		 "(alias of merge_number)");
+		 "max request queue size before procssing, default 16 ");
 
-static int merge_number = 32;
-module_param(merge_number, int, 0444);
-MODULE_PARM_DESC(merge_number,
-		 "max request queue size before procssing, default 32 "
-		 "(alias of r62_max_reqs)");
+static int no_merge = 0;
+module_param(no_merge, int, 0444);
+MODULE_PARM_DESC(no_merge,
+		 "do not perform request merge, default 0 (No)");
 
 static int use_cpu = 0;
 module_param(use_cpu, int, 0444);
@@ -389,7 +387,7 @@ module_param(use_sim, int, 0444);
 MODULE_PARM_DESC(use_cpu,
 		 "use cpu simulation for GPU call, default 0 (No)");
 
-static int batch_timeout = 10;
+static int batch_timeout = 6;
 module_param(batch_timeout, int, 0444);
 MODULE_PARM_DESC(batch_timeout,
 		 "timeout for batching requests, default 10, in jiffies");
@@ -459,6 +457,8 @@ static void process_r62_requests(struct list_head *reqs, int n, size_t tsz)
 
     size_t rsz = n<<(PAGE_SHIFT+1);
     size_t dsz = sizeof(struct r62_recov_data)+n*sizeof(struct r62_tbl);
+
+    //do_log(KGPU_LOG_PRINT, "#req = %d\n", n);
 
     gbuf = (u8*)kgpu_vmalloc(2*rsz+round_up(dsz, PAGE_SIZE));
 			     
@@ -565,7 +565,8 @@ static void process_r62_requests(struct list_head *reqs, int n, size_t tsz)
 	    
 	    r->status = R62_REQUEST_DONE;
 	    prnt("to complete req %lu %d\n", r->id, j);
-	    complete(&r->c);
+	    if (!no_merge)
+		complete(&r->c);
 	    j++;
 	}
 	goto free_out;
@@ -576,7 +577,8 @@ fail_out:
 	r = list_entry(pos, struct r62_request, list);
 	list_del(pos);
 	r->status = R62_REQUEST_ERROR;
-	complete(&r->c);
+	if (likely(!no_merge))
+	    complete(&r->c);
 	prnt("done req %lu with error\n", r->id);
     }
     
@@ -609,7 +611,7 @@ static int r62d(void *data)
     int n;
     struct list_head reqs;
 	
-    while(1) {
+    while(!no_merge) {
 	wait_event_timeout(r62dat.ktwait,
 			   r62dat.nr >= r62_max_reqs,
 			   batch_timeout);
@@ -679,19 +681,27 @@ static void gpu_async_raid6_2drecov(int disks, size_t bytes,
     r->failb = failb;
     r->blocks = blocks;
 
-    spin_lock_irq(&r62dat.reqlock);
-    list_add_tail(&r->list, &r62dat.reqs);
-    r62dat.nr++;
-    if (r62dat.nr >= r62_max_reqs) {    	
-    	spin_unlock_irq(&r62dat.reqlock);
-    	wake_up_all(&r62dat.ktwait);
-    	prnt("reach max reqs\n");
+    if (likely(!no_merge)) {
+ 
+	spin_lock_irq(&r62dat.reqlock);
+	list_add_tail(&r->list, &r62dat.reqs);
+	r62dat.nr++;
+	if (r62dat.nr >= r62_max_reqs) {    	
+	    spin_unlock_irq(&r62dat.reqlock);
+	    wake_up_all(&r62dat.ktwait);
+	    prnt("reach max reqs\n");
+	} else {
+	    spin_unlock_irq(&r62dat.reqlock);
+	    prnt("req %lu added\n", r->id);    	
+	}
+	
+	wait_for_completion(&r->c);
     } else {
-    	spin_unlock_irq(&r62dat.reqlock);
-    	prnt("req %lu added\n", r->id);    	
+	struct list_head h;
+	INIT_LIST_HEAD(&h);
+	list_add_tail(&r->list, &h);
+	process_r62_requests(&h, 1, PAGE_SIZE);
     }
-    
-    wait_for_completion(&r->c);
     
     prnt("req %lu finished\n", r->id);
     kmem_cache_free(r62_request_cache, r);
@@ -699,8 +709,6 @@ static void gpu_async_raid6_2drecov(int disks, size_t bytes,
 
 static int __init r62_recov_module_init(void)
 {
-    if (merge_number != 32)
-	merge_number = r62_max_reqs;
     init_gpu_system();
     if (test)
 	do_test();

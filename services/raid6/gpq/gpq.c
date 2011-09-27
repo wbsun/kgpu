@@ -165,7 +165,7 @@ static void gpu_gen_syndrome(
     }    
 }
 
-#define SPLIT_NR 8
+#define SPLIT_NR 4
 
 static void* __multi_gpu_gen_syndrome(
     int disks, size_t dsize, void **dps, struct completion cs[], int async)
@@ -358,7 +358,7 @@ static long test_recov_2data(int disks, size_t dsize)
 
 #define TEST_NDISKS 8
 #define MIN_DSZ (1024*4)
-#define MAX_DSZ (256*1024)
+#define MAX_DSZ (64*1024)
 #define TEST_TIMES_SHIFT 4
 #define TEST_TIMES (1<<TEST_TIMES_SHIFT)
 

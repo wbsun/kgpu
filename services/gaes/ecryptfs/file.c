@@ -263,23 +263,28 @@ static int ecryptfs_flush(struct file *file, fl_owner_t td)
 	int rc = 0;
 	struct file *lower_file = NULL;
 
-	lower_file = ecryptfs_file_to_lower(file);
-	if (lower_file->f_op && lower_file->f_op->flush)
+	if (file) {
+	    lower_file = ecryptfs_file_to_lower(file);
+	    if (lower_file && lower_file->f_op && lower_file->f_op->flush)
 		rc = lower_file->f_op->flush(lower_file, td);
+	}
 	return rc;
 }
 
 static int ecryptfs_release(struct inode *inode, struct file *file)
 {
-	kmem_cache_free(ecryptfs_file_info_cache,
-			ecryptfs_file_to_private(file));
+    /*if (file && ecryptfs_file_to_private(file))
+		kmem_cache_free(ecryptfs_file_info_cache,
+		ecryptfs_file_to_private(file));*/
 	return 0;
 }
 
 static int
 ecryptfs_fsync(struct file *file, int datasync)
 {
-	return vfs_fsync(ecryptfs_file_to_lower(file), datasync);
+	if (ecryptfs_file_to_lower(file))
+		return vfs_fsync(ecryptfs_file_to_lower(file), datasync);
+	return 0;
 }
 
 static int ecryptfs_fasync(int fd, struct file *file, int flag)
@@ -288,7 +293,7 @@ static int ecryptfs_fasync(int fd, struct file *file, int flag)
 	struct file *lower_file = NULL;
 
 	lower_file = ecryptfs_file_to_lower(file);
-	if (lower_file->f_op && lower_file->f_op->fasync)
+	if (lower_file && lower_file->f_op && lower_file->f_op->fasync)
 		rc = lower_file->f_op->fasync(fd, lower_file, flag);
 	return rc;
 }

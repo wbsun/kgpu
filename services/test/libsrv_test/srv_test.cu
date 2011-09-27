@@ -11,65 +11,58 @@
 #include "../../../kgpu/kgpu.h"
 #include "../../../kgpu/gputils.h"
 
-
-__global__ void inc_kernel(int *din, int *dout)
+__global__ void empty_kernel(void)
 {
-    int id = threadIdx.x +  blockIdx.x*blockDim.x;
-
-    dout[id] = din[id]+1;    
 }
 
-int test_compute_size(struct kgpu_service_request *sr)
+static int empty_cs(struct kgpu_service_request *sr)
 {
-    sr->block_x = 32;
-    sr->grid_x = sr->insize/256;
+    sr->block_x = 1;
+    sr->grid_x = 1;
     sr->block_y = 1;
     sr->grid_y = 1;
-
     return 0;
 }
 
-int test_launch(struct kgpu_service_request *sr)
+static int empty_launch(struct kgpu_service_request *sr)
 {
-    printf("invoke kernel\n");
-    inc_kernel<<<dim3(sr->grid_x, sr->grid_y), dim3(sr->block_x, sr->block_y), 0, (cudaStream_t)(sr->stream)>>>
-	((int*)sr->din, (int*)sr->dout);
-    printf("invoke done\n");
+    empty_kernel<<<dim3(sr->grid_x, sr->grid_y),
+	dim3(sr->block_x, sr->block_y), 0, (cudaStream_t)(sr->stream)>>>();
     return 0;
 }
 
-int test_prepare(struct kgpu_service_request *sr)
+static int empty_prepare(struct kgpu_service_request *sr)
 {
-    cudaStream_t s = (cudaStream_t)(sr->stream);//gpu_get_stream(sr->stream_id);
+    cudaStream_t s = (cudaStream_t)(sr->stream);
     csc( ah2dcpy( sr->din, sr->hin, sr->insize, s) );
     return 0;
 }
 
-int test_post(struct kgpu_service_request *sr)
+static int empty_post(struct kgpu_service_request *sr)
 {
-    cudaStream_t s = (cudaStream_t)(sr->stream);//gpu_get_stream(sr->stream_id);
+    cudaStream_t s = (cudaStream_t)(sr->stream);
     csc( ad2hcpy( sr->hout, sr->dout, sr->outsize, s) );
     return 0;
 }
 
-struct kgpu_service test_srv;
+static struct kgpu_service empty_srv;
 
 extern "C" int init_service(void *lh, int (*reg_srv)(struct kgpu_service*, void*))
 {
     printf("[libsrv_test] Info: init test service\n");
     
-    sprintf(test_srv.name, "test_service");
-    test_srv.sid = 0;
-    test_srv.compute_size = test_compute_size;
-    test_srv.launch = test_launch;
-    test_srv.prepare = test_prepare;
-    test_srv.post = test_post;
-    
-    return reg_srv(&test_srv, lh);
+    sprintf(empty_srv.name, "empty_service");
+    empty_srv.sid = 1;
+    empty_srv.compute_size = empty_cs;
+    empty_srv.launch = empty_launch;
+    empty_srv.prepare = empty_prepare;
+    empty_srv.post = empty_post;
+
+    return reg_srv(&empty_srv, lh);
 }
 
 extern "C" int finit_service(void *lh, int (*unreg_srv)(const char*))
 {
     printf("[libsrv_test] Info: finit test service\n");
-    return unreg_srv(test_srv.name);
+    return unreg_srv(empty_srv.name);
 }

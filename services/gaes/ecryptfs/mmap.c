@@ -855,6 +855,6 @@ const struct address_space_operations ecryptfs_aops = {
 	.readpages = ecryptfs_readpages,
 	.write_begin = ecryptfs_write_begin,
 	.write_end = ecryptfs_write_end,
-	.writepages = ecryptfs_writepages,
+//	.writepages = ecryptfs_writepages,
 	.bmap = ecryptfs_bmap,
 };

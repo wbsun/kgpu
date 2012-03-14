@@ -46,5 +46,24 @@ typedef long  s64;
 #define IS_KRID(id) ((id) > 0)
 #define IS_URID(id) ((id) < 0)
 
+#ifndef __KERNEL__
+
+#define __round_mask(x, y) ((__typeof__(x))((y)-1))
+#define round_up(x, y) ((((x)-1) | __round_mask(x, y))+1)
+#define round_down(x, y) ((x) & ~__round_mask(x, y))
+
+#ifndef PAGE_SIZE
+#define PAGE_SIZE 4096
+#endif
+
+#include "list.h"
+
+#endif
+
+#ifdef __KERNEL__
+
+#include <linux/list.h>
+
+#endif
 
 #endif

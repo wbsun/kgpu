@@ -1,0 +1,1 @@
+* kucomm.c ioctl function: check whether 'int' type argument still needs pointer.

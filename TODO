@@ -1,2 +1,3 @@
 * kucomm.c ioctl function: check whether 'int' type argument still needs pointer.
 * gpumm.c mm_clear_* functions: write them.
+* gpumm.c host mem map allocation/free functions: different types of map may need special vma flag setting to work-around the restriction checks.

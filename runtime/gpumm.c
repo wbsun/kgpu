@@ -7,19 +7,24 @@
  */
 
 /* Function prototypes: */
+
 static void mm_clear_host_alloc_buf(void);
 static void mm_clear_host_map_buf(void);
 static void mm_clear_dev_buf(void);
 
+
 void gpumm_init(void);
 void gpumm_finit(void);
 
+
 static struct page* uv2page(unsigned long v);
+
 
 int mm_set_host_alloc_buf(ku_meminfo_t* info);
 int mm_set_host_map_buf(ku_meminfo_t* info);
 int mm_set_host_map_type(int maptype);
 int mm_set_dev_buf(ku_devmeminfo_t* info);
+
 
 void* kg_vmalloc(u64 nbytes);
 void  kg_vfree(void* p);
@@ -31,6 +36,10 @@ void kg_unmap_area(u64 start);
 int kg_map_page(struct page *p, u64 addr);
 
 void* kg_map_pages(struct page **ps, int nr); 
+
+
+int mm_alloc_krequest_devmem(k_request_t *r);
+int mm_free_krequest_devmem(k_request_t *r); 
 
 
 /* Globals: */
@@ -410,23 +419,101 @@ EXPORT_SYMBOL_GPL(kg_free_mmap_area);
 
 void kg_unmap_area(u64 start)
 {
+	u64 idx = (start-hmvma.start)>>PAGE_SHIFT;
 	
+	if (idx < 0 || idx >= hmvma.npages) {
+		krt_log(KGPU_LOG_ERROR,
+			"Invalid GPU mmap pointer 0x%lX to unmap\n",
+			start);
+	} else {
+		u32 n = hmvma.alloc_sz[idx];
+		if (n > (hmvma.npages - idx)) {
+			krt_log(KGPU_LOG_ERROR,
+				"Invalid GPU mmap allocation info: "
+				"allocated %u pages at index %u\n", n, idx);
+			return;
+		}
+		if (n > 0) {
+			int ret;
+			spin_lock(&hmvma.lock);
+			bitmap_clear(hmvma.bitmap, idx, n);
+			hmvma.alloc_sz[idx] = 0;
+			
+			/*unmap_mapping_range(hmvma.vma->vm_file->f_mapping,
+			 start, n<<PAGE_SHIFT, 1);*/
+			
+			hmvma.vma->vm_flags |= VM_PFNMAP;
+			ret = zap_vma_ptes(hmvma.vma, start, n<<PAGE_SHIFT);
+			if (ret)
+				krt_log(KGPU_LOG_ALERT,
+					"zap_vma_ptes returns %d\n", ret);
+			hmvma.vma->vm_flags &= ~VM_PFNMAP;
+			spin_unlock(&hmvma.lock);
+		}
+	}
 }
 EXPORT_SYMBOL_GPL(kg_unmap_area);
 
 int kg_map_page(struct page *p, u64 addr)
 {
+	int ret = 0;
 	
+	down_write(&hmvma.vma->vm_mm->mmap_sem);
+	ret = vm_insert_page(hmvma.vma, addr, p);
+	if (unlikely(ret < 0)) {
+		krt_log(KGPU_LOG_ERROR,
+			"Can't remap pfn %lu, error %d, count %d.\n",
+			page_to_pfn(p), ret, page_count(p));
+	}
+	up_write(&hmvma.vma->vm_mm->mmap_sem);
+	
+	return ret;
 }
 EXPORT_SYMBOL_GPL(kg_map_page);
 
 void* kg_map_pages(struct page **ps, int nr)
 {
+	u64 addr, a;
+	int i;
+	int ret;
 	
+	addr = kg_alloc_mmap_area(nr<<PAGE_SHIFT);
+	if (!addr) {
+		return NULL;
+	}
+	
+	down_write(&hmvma.vma->vm_mm->mmap_sem);
+	
+	a = addr;
+	for (i=0; i<n; i++) {
+		ret = vm_insert_page(hmvma.vma, a, ps[i]);		
+		if (unlikely(ret < 0)) {
+			up_write(&hmvma.vma->vm_mm->mmap_sem);
+			
+			/* Not sure whether to free the mmap area or not. */
+			
+			krt_log(KGPU_LOG_ERROR,
+				"Can't remap %d pfn %lu, error code %d\n",
+				i, page_to_pfn(ps[i]), ret);
+			return NULL;
+		}
+	}
+	
+	up_write(&hmvma.vma->vm_mm->mmap_sem);
+	
+	return (void*)addr;
 }
 EXPORT_SYMBOL_GPL(kg_map_pages);
 
+int mm_alloc_krequest_devmem(k_request_t *r)
+{
+	
+}
 
+int mm_free_krequest_devmem(k_request_t *r)
+{
+	
+}
 
 
 

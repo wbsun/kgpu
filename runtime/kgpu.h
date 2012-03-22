@@ -273,6 +273,8 @@ extern int mm_set_host_alloc_buf(ku_meminfo_t* info);
 extern int mm_set_host_map_buf(ku_meminfo_t* info);
 extern int mm_set_host_map_type(int maptype);
 extern int mm_set_dev_buf(ku_devmeminfo_t* info);
+extern int mm_alloc_krequest_devmem(k_request_t *r);
+extern int mm_free_krequest_devmem(k_request_t *r); 
 extern int set_uservice_info(ku_serviceinfo_t* info);
 extern int krt_stop(void);
 

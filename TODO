@@ -1,1 +1,2 @@
 * kucomm.c ioctl function: check whether 'int' type argument still needs pointer.
+* gpumm.c mm_clear_* functions: write them.

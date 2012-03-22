@@ -165,6 +165,9 @@ static long cd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	case KGPU_IOC_SET_HOST_ALLOC_BUF:
 		err = mm_set_host_alloc_buf((ku_meminfo_t*)arg);
 		break;
+	case KGPU_IOC_SET_HOST_MAP_TYPE:
+		err = mm_set_host_map_type((int*)arg);
+		break;
 	case KGPU_IOC_SET_HOST_MAP_BUF:
 		err = mm_set_host_map_buf((ku_meminfo_t*)arg);
 		break;

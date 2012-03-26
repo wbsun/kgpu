@@ -16,10 +16,17 @@
 #define KGPU_SERVICE_NAME_SIZE 32
 
 /* KGPU's errno */
-#define KGPU_OK 0
-#define KGPU_NO_RESPONSE 1
-#define KGPU_NO_SERVICE 2
-#define KGPU_TERMINATED 3
+#define KGPU_OK                         0
+#define KGPU_ENO_RESPONSE               1
+#define KGPU_ENO_SERVICE                2
+#define KGPU_ETERMINATED                3
+#define KGPU_ENO_MEM                    4
+#define KGPU_ENO_STREAM                 5
+#define KGPU_EINVALID_DEVICE            6
+#define KGPU_ESYS                       7
+#define KGPU_EINVALID_POINTER           8
+#define KGPU_EINVALID_MALLOC_INFO       9
+
 
 #define KGPU_DEV_NAME "kgpu"
 
@@ -62,6 +69,20 @@
 #define KGPU_MERGE_SRC     0x00000040
 #define KGPU_MERGE_PROD    0x00000080
 
+typedef struct kg_depon_t {
+	int id;
+	int level;
+	u64 out;
+	u64 outsize;
+	u64 flags;
+} kg_depon_t;
+
+typedef struct kg_depby_t {
+	int id;
+	int level;
+	u64 flags;
+} kg_depby_t;
+
 /* Request struct and related ones used by kernel space: */
 struct kg_request_t;
 
@@ -77,10 +98,9 @@ typedef struct kg_request_t {
 	
 	u32 memflags;
 	
-	int *depon, *depby;
+	kg_depon_t *depons;
+	kg_depby_t *depbys;
 	u32 nrdepon, nrdepby;
-	int deponlevel;
-	int depbylevel;
     
 	int device;
 
@@ -120,6 +140,10 @@ typedef struct ku_request_t {
 	u64 insize, outsize, datasize;
 	
 	u32 memflags;
+
+	kg_depon_t *depons;
+	kg_depby_t *depbys;
+	u32 nrdepon, nrdepby;
 
 	int device;
 	int stream_idx;
@@ -209,11 +233,10 @@ typdef struct k_request_t {
 	
 	int device;
 	int stream_idx;
-	
-	int *depon, *depby;
+
+	kg_depon_t *depons;
+	kg_depby_t *depbys;
 	u32 nrdepon, nrdepby;
-	int deponlevel;
-	int depbylevel
 
 	u64 start_time;
 
@@ -293,7 +316,7 @@ typedef kg_k_service_t {
 
 	int (*make_request)(kg_request_t* r);
 	
-	struct rb_node srbnode;   /* Service db */	
+	struct hlist_node hashnode;   /* Service db */	
 } kg_k_service_t;
 
 extern int kg_register_kservice(kg_k_service_t* s);
@@ -303,8 +326,8 @@ extern kg_k_service_t* get_kservice(char *name);
 extern int put_kservice(kg_k_service_t* s);
 extern kg_k_service_t* remove_kservice(char* name);
 
-extern void ksbase_init(void);
-extern void ksbase_finit(void);
+extern void ksdb_init(void);
+extern void ksdb_finit(void);
 
 
 /* Kernel space GPU resource */

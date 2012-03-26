@@ -35,8 +35,23 @@ void kg_free_mmap_area(u64 start);
 void kg_unmap_area(u64 start);
 int kg_map_page(struct page *p, u64 addr);
 
-void* kg_map_pages(struct page **ps, int nr); 
+void* kg_map_pages(struct page **ps, int nr);
 
+static int bitmap_mm_alloc(u64 size,
+			   u64 *p,
+			   u32 unitsize,
+			   spinlock_t *lock,
+			   u64 *bitmap,
+			   u32 *alloc_sz,
+			   u32 nunits,
+			   u64 start);
+static int bitmap_mm_free(u64 p,
+			  u32 unitsize,
+			  spinlock_t *lock,
+			  u64 *bitmap,
+			  u32 *alloc_sz,
+			  u32 nunits,
+			  u64 start);
 
 int mm_alloc_krequest_devmem(k_request_t *r);
 int mm_free_krequest_devmem(k_request_t *r); 
@@ -299,64 +314,78 @@ get_out:
 	return ret;		
 }
 
+/*
+ * Memory allocation in KGPU adopts a simple mechansim: a bitmap is used to
+ * track all allocation units, which can be defined by changing KGPU_BUF_UNIT_SIZE
+ * macro. When allocating a trunk of memory, consecutive zero bits are searched
+ * linearly from the beginning of the bitmap to fit the requested size of memory,
+ * then those bits are set for allocation. To track the allocated size, a silly
+ * sizes array is created, which is the 'alloc_sz' filed in those k_meminfo_*
+ * structures, each allocation unit has its own allocation size record in that
+ * array. The unit at the beginning of the allocated memory trunk has its record
+ * filled with the allocation size, other records are ignored. So when freeing
+ * the memory trunk, kg_vfree can simply get the size record of the beginning
+ * unit and free certain number of bits according to the size.
+ */
 void* kg_vmalloc(u64 nbytes)
 {
-	u32 nunits = DIV_ROUND_UP(nbytes, KGPU_BUF_UNIT_SIZE);
-	void *p = NULL;
-	u64 idx;
-	
-	spin_lock(&hmpool.lock);
-	
-	idx = bitmap_find_next_zero_area(hmpool.bitmap, 
-					 hmpool.nunits, 
-					 0, 
-					 nunits, 
-					 0);
-	
-	if (idx < hmpool.nunits) {
-		bitmap_set(hmpool.bitmap, idx, nunits);
-		p = (void*)(hmpool.kva + (idx<<KGPU_BUF_UNIT_SHIFT));
-		hmpool.alloc_sz[idx] = nunits;
-	} else {
-		krt_log(KGPU_LOG_ERROR,
-			"Out of host memory for kg_vmalloc %lu.\n",
-			nbytes);
+	int ret;
+	u64 addr = 0;
+
+	ret = bitmap_mm_alloc(nbytes, &addr, KGPU_BUF_UNIT_SIZE,
+			      &hmpool.lock,
+			      hmpool.bitmap,
+			      hmpool.alloc_sz,
+			      hmpool.nunits,
+			      hmpool.kva);
+	if (unlikely(ret)) {
+		if (ret == KGPU_ENO_MEM) {
+			krt_log(KGPU_LOG_ERROR,
+				"Out of host memory for %lu.\n",
+				nbytes);
+		} else {
+			krt_log(KGPU_LOG_ERROR,
+				"Error when allocating host mem"
+				" for %lu bytes, code %d.\n",
+				nbytes, ret);
+		}			
 	}
-	spin_unlock(&hmpool.lock);
 	
-	return p;
+	return (void*)addr;
 }
 EXPORT_SYMBOL_GPL(kg_vmalloc);
 
 void kg_vfree(void* p)
 {
-	u64 idx = (TO_UL(p) - hmpool.kva) >> KGPU_BUF_UNIT_SHIFT;
-	u32 nunits;
-	
-	if (!p) return;
-	
-	if (idx < 0 || idx >= hmpool.nunits) {
-		krt_log(KGPU_LOG_ERROR,
-			"Invalid host mem pointer %p to free.\n",
-			p);
-		return;
+	int ret;
+
+	ret = bitmap_mm_free(TO_UL(p), KGPU_BUF_UNIT_SIZE,
+			     &hmpool.lock,
+			     hmpool.bitmap,
+			     hmpool.alloc_sz,
+			     hmpool.nunits,
+			     hmpool.kva);
+
+	if (unlikely(ret)) {
+		switch (ret) {
+		case KGPU_EINVALID_POINTER:
+			krt_log(KGPU_LOG_ERROR,
+				"Invalid host mem pointer %p to free.\n",
+				p);
+			break;
+		case KGPU_EINVALID_MALLOC_INFO:
+			krt_log(KGPU_LOG_ERROR,
+				"Invalid host mem allocation info: "
+				"pointer %p.\n",
+				(void*)p);
+			break;
+		default:
+			krt_log(KGPU_LOG_ERROR,
+				"Error when free host memory %p, code: %d.\n",
+				p, ret);
+			break;			
+		}
 	}
-	
-	nunits = hmpool.alloc_sz[idx];
-	if (nunits == 0) return;
-	
-	if (nunits > hmpool.nunits - idx) {
-		krt_log(KGPU_LOG_ERROR,
-			"Invalid host mem allocation info: "
-			"allocated %u units at index %u.\n",
-			nunits, idx);
-		return;
-	}
-	
-	spin_lock(&hmpool.lock);
-	bitmap_clear(hmpool.bitmap, idx, nunits);
-	hmpool.alloc_sz[idx] = 0;
-	spin_unlock(&hmpool.lock);
 }
 EXPORT_SYMBOL_GPL(kg_vfree);
 
@@ -505,8 +534,142 @@ void* kg_map_pages(struct page **ps, int nr)
 }
 EXPORT_SYMBOL_GPL(kg_map_pages);
 
+static int bitmap_mm_alloc(u64 size,
+			   u64 *p,
+			   u32 unitsize,
+			   spinlock_t *lock,
+			   u64 *bitmap,
+			   u32 *alloc_sz,
+			   u32 nunits,
+			   u64 start)
+{
+	u32 req_nunits = DIV_ROUND_UP(size, unitsize);
+	u64 idx;
+	int ret = 0;
+	
+	*p = 0;	
+	spin_lock(lock);
+	
+	idx = bitmap_find_next_zero_area(bitmap, 
+					 nunits, 
+					 0, 
+					 req_nunits, 
+					 0);
+	if (idx < nunits) {
+		bitmap_set(bitmap, idx, req_nunits);
+		addr = start  + (idx*unitsize);
+		alloc_sz[idx] = req_nunits;
+	} else
+		ret = KGPU_ENO_MEM;
+	
+	spin_unlock(lock);
+
+	return ret;
+}
+
+static u64 alloc_devmem(u64 size, k_gpu_t *gpu)
+{
+	int ret;
+	u64 addr = 0;
+
+	ret = bitmap_mm_alloc(size, &addr, KGPU_BUF_UNIT_SIZE,
+			      &gpu->devmem.lock,
+			      gpu->devmem.bitmap,
+			      gpu->devmem.alloc_sz,
+			      gpu->devmem.nunits,
+			      gpu->devmem.start);
+	if (unlikely(ret)) {
+		if (ret == KGPU_ENO_MEM) {
+			krt_log(KGPU_LOG_ERROR,
+				"Out of device memory on GPU %d for %lu.\n",
+				gpu->id, size);
+		} else {
+			krt_log(KGPU_LOG_ERROR,
+				"Error when allocating device mem on GPU %d"
+				" for %lu, code %d.\n",
+				gpu->id, size, ret);
+		}			
+	}
+	
+	return addr;	
+}
+
+static int bitmap_mm_free(u64 p,
+			  u32 unitsize,
+			  spinlock_t *lock,
+			  u64 *bitmap,
+			  u32 *alloc_sz,
+			  u32 nunits,
+			  u64 start)
+{
+	u64 idx = (p - start) / unitsize;
+	u32 alloc_nunits;
+	int ret = 0;
+	
+	if (!p) return ret;
+	
+	if (idx < 0 || idx >= nunits) {
+		ret = KGPU_EINVALID_POINTER;
+	} else {	
+		alloc_nunits = alloc_sz[idx];
+		if (alloc_nunits == 0) return ret;
+		
+		if (alloc_nunits > nunits - idx) 
+			ret = KGPU_EINVALID_MALLOC_INFO;
+		else {
+			spin_lock(lock);
+			bitmap_clear(bitmap, idx, alloc_nunits);
+			alloc_sz[idx] = 0;
+			spin_unlock(lock);
+		}
+	}
+
+	return ret;	
+}
+
+static void free_devmem(u64 p, k_gpu_t *gpu)
+{
+	int ret;
+
+	ret = bitmap_mm_free(p, KGPU_BUF_UNIT_SIZE,
+			     &gpu->devmem.lock,
+			     gpu->devmem.bitmap,
+			     gpu->devmem.alloc_sz,
+			     gpu->devmem.nunits,
+			     gpu->devmem.start);
+
+	if (unlikely(ret)) {
+		switch (ret) {
+		case KGPU_EINVALID_POINTER:
+			krt_log(KGPU_LOG_ERROR,
+				"Invalid device mem pointer %p on GPU %d to free.\n",
+				(void*)p, gpu->id);
+			break;
+		case KGPU_EINVALID_MALLOC_INFO:
+			krt_log(KGPU_LOG_ERROR,
+				"Invalid device mem allocation info: "
+				"pointer %p on GPU %d.\n",
+				(void*)p, gpu->id);
+			break;
+		default:
+			krt_log(KGPU_LOG_ERROR,
+				"Error when free device memory %p, code: %d.\n",
+				(void*)p, ret);
+			break;			
+		}
+	}
+}
+
 int mm_alloc_krequest_devmem(k_request_t *r)
 {
+	int i;
+	kg_depon_t *depby;
+	k_gpu_t *gpu;
+
+	gpu = get_k_gpu(t->device);
+	if (!gpu) {
+		return KGPU_EINVALID_DEVICE;
+	}
 	
 }
 

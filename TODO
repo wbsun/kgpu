@@ -1,3 +1,8 @@
 * kucomm.c ioctl function: check whether 'int' type argument still needs pointer.
 * gpumm.c mm_clear_* functions: write them.
-* gpumm.c host mem map allocation/free functions: different types of map may need special vma flag setting to work-around the restriction checks.
+* gpumm.c host mem map allocation/free functions: different types of map may need
+  special vma flag setting to work-around the restriction checks.
+* kucomm.c: ku_request_t has been modified, so read() and its related functions
+  must be changed. Especially the request buffer, which was fixed size before, but
+  now needs changing size according to depon and depby numbers.
+

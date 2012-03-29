@@ -281,12 +281,13 @@ extern int depon_done(k_request_t* r);
 extern int split_seg_done(k_request_t* r);
 extern int merged_done(k_request_t* r);
 
-/* Global shared request base, which stores all requests in k_request_t format: */
+/* Global shared request store, which stores all requests in k_request_t format: */
 extern k_request_t* get_krequest(int id);
-extern int put_krequest(k_request_t* r);
-extern k_request_t* remove_krequest(int id);
-extern void krbase_init(void);
-extern void krbase_finit(void);
+extern k_request_t* put_krequest(k_request_t* r);
+extern k_request_t* del_krequest(int id);
+extern void krdb_init(void);
+extern void krdb_finit(void);
+extern u32 krdb_size(void);
 
 /* GPU resource management module functions */
 
@@ -324,7 +325,7 @@ extern int kg_unregister_kservice(kg_k_service_t* s);
 
 extern kg_k_service_t* get_kservice(char *name);
 extern int put_kservice(kg_k_service_t* s);
-extern kg_k_service_t* remove_kservice(char* name);
+extern kg_k_service_t* del_kservice(char* name);
 
 extern void ksdb_init(void);
 extern void ksdb_finit(void);

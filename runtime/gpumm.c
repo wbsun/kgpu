@@ -557,7 +557,7 @@ static int bitmap_mm_alloc(u64 size,
 					 0);
 	if (idx < nunits) {
 		bitmap_set(bitmap, idx, req_nunits);
-		addr = start  + (idx*unitsize);
+		*p = start  + (idx*unitsize);
 		alloc_sz[idx] = req_nunits;
 	} else
 		ret = KGPU_ENO_MEM;
@@ -660,6 +660,14 @@ static void free_devmem(u64 p, k_gpu_t *gpu)
 	}
 }
 
+/*
+ * Allocation logic:
+ * IF r has depon:
+ *     build_depon_outs() to fill 'out' and 'outsize' in kg_depon_t array
+ *     IF memflags includes NO_DEV_MEM_ALLOC:
+ *         fill din/dout/ddata with NULL, their sizes to be 0, DONE
+ *     ELSE-IF
+ */
 int mm_alloc_krequest_devmem(k_request_t *r)
 {
 	int i;

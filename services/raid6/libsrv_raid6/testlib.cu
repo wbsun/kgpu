@@ -10,12 +10,13 @@
 #include <cuda.h>
 #include <sys/time.h>
 #include "../../../kgpu/gputils.h"
+#include "../r62_recov.h"
 
-#define THREADS_PER_BLOCK 64
+#define THREADS_PER_BLOCK 512
 
 #include "dev.cu"
 
-#define NSTREAM 8
+#define NSTREAM 32
 
 extern "C" void cuda_gen_syndrome(int disks, unsigned long dsize, void**dps, int stride)
 {

@@ -9,9 +9,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-void cuda_gen_syndrome(int disks, unsigned long dsize, void **dps, int stride);
+extern void cuda_gen_syndrome(int disks, unsigned long dsize, void **dps, int stride);
 
-#define NDISKS 16
+#define NDISKS 12
 #define MAX_DSZ (1024*64)
 #define MIN_DSZ (1024*4)
 #define DSZ (1024*128)
@@ -32,7 +32,7 @@ int main()
     printf("do testing...\n");
     for (sz = MIN_DSZ; sz <= MAX_DSZ; sz += MIN_DSZ)
     	//for (i=1; i<32; i++) {    	
-	    cuda_gen_syndrome(NDISKS, sz, dps, 1);
+	    cuda_gen_syndrome(NDISKS, sz, dps, 2);
 	//}
     
     printf("done!\n");

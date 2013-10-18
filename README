@@ -1,6 +1,17 @@
 
      KGPU - Augmenting Linux with GPUs
 
+** Important note:
+
+     A new branch 'k32' is created for KGPU compilation on 3.x kernels,
+     I tested 3.2.16. If you want to try KGPU on recent kernels, definitely
+     checkout that branch.
+
+     I don't have time to modify everything to comply with the latest kernel,
+     so k32 branch has gaes and raid6 services disabled. Just leaves an
+     example service for hubbyists to borrow code to start with their own
+     service development.
+
 
 What is it?
 

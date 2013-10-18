@@ -243,6 +243,4 @@ static void raid6_test_exit(void)
  */
 late_initcall(raid6_test);
 module_exit(raid6_test_exit);
-MODULE_AUTHOR("Dan Williams <dan.j.williams@intel.com>");
-MODULE_DESCRIPTION("asynchronous RAID-6 recovery self tests");
 MODULE_LICENSE("GPL");

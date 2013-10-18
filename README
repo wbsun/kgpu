@@ -1,6 +1,19 @@
 
      KGPU - Augmenting Linux with GPUs
 
+** Important for kernel 3.x (I am using 3.2.16):
+
+     To compile KGPU on these kernels, I disabled 'gaes' service and
+     'raid6' service. The only available service is the test one, which
+     should be enough as an example for hubbyists to write their own
+     services.
+
+     Due to the disabled gaes and raid6 services, the ecryptfs, dm-crypt
+     and raid456 kernel modules mentioned in the following text are not
+     available on 3.x kernels.
+
+     Happy hacking!
+
 
 What is it?
 
@@ -42,7 +55,7 @@ News
 Try it?
 
     Hardware:
-	We use GTX480. You don't need such high-end video
+	We use GTX480/Titan. You don't need such high-end video
     	card, but you should have a NVIDIA card that support CUDA
     	computing capability 2.0 or higher.  If you don't have more
     	than 1G video memory, change KGPU_BUF_SIZE in kgpu/kgpu.h to
@@ -58,8 +71,8 @@ Try it?
 	video memory size/2.
 
     Software:
-        We compile the CUDA code with nvcc in CUDA 4.0. The OS
-	kernel is vanilla Linux 2.6.39.4. You MUST use a 64bit linux
+        We compile the CUDA code with nvcc in CUDA 4.0+. The OS
+	kernel is Linux 2.6.39.4. You MUST use a 64bit linux
 	kernel compiled targeting at x86_64!
 
     Make and Run it:
@@ -87,5 +100,5 @@ Try it?
         sudo ./stopkgpu (in build/)
 
 
-Weibin Sun, Xing Lin
-{wbsun, xinglin}@cs.utah.edu
+Weibin Sun
+wbsun@cs.utah.edu

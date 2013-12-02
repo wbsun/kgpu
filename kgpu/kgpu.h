@@ -53,8 +53,8 @@ struct kgpu_ku_response {
 #if defined __KERNEL__ || defined __KGPU__
 
 /* the NR will not be used */
-#define KGPU_BUF_NR 1
-#define KGPU_BUF_SIZE (1024*1024*1024)
+#define KGPU_BUF_NR 2
+#define KGPU_BUF_SIZE (2*1024*1024*1024UL)
 
 #define KGPU_MMAP_SIZE KGPU_BUF_SIZE
 
@@ -117,6 +117,7 @@ struct kgpu_service_request {
 #ifdef __KERNEL__
 
 #include <linux/list.h>
+#include <linux/mm_types.h>
 
 struct kgpu_request;
 
@@ -144,7 +145,7 @@ extern void kgpu_vfree(void* p);
 extern void *kgpu_map_pfns(unsigned long *pfns, int n);
 extern void *kgpu_map_pages(struct page **pages, int n);
 extern void kgpu_unmap_area(unsigned long addr);
-extern int kgpu_map_page(struct page*, unsigned long);
+extern int kgpu_map_page(struct page* p, unsigned long s);
 extern void kgpu_free_mmap_area(unsigned long);
 extern unsigned long kgpu_alloc_mmap_area(unsigned long);
 

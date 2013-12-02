@@ -1065,4 +1065,4 @@ module_exit(mod_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Weibin Sun");
-MODULE_DESCRIPTION("GPU computing frameworka and driver");
+MODULE_DESCRIPTION("GPU computing framework and driver");

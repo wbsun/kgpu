@@ -225,9 +225,9 @@ static int __init taes_init(void)
 		return 0;
 	test_gpu = 0;
 	/* test_aes(); */
-	/* CIPHER = AES; */
+	CIPHER = AES;
 	/* test_aes(); */
-	CIPHER = AES_GENERIC;
+	/* CIPHER = AES_GENERIC; */
 	test_aes();
 	return 0;
 }
